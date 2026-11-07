@@ -1,0 +1,22 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e ".[dev]"
+      - run: ruff check .
+      - run: pytest -q
+      - run: pyinstaller --noconfirm --clean --onefile --windowed --name YouTubeSmartDownloader --paths src src/youtube_smart_downloader/__main__.py
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/YouTubeSmartDownloader.exe
+          generate_release_notes: true
