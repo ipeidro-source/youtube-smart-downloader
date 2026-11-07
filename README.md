@@ -18,8 +18,8 @@ Only download content when you have the necessary rights or permission.
 
 ## Windows usage
 
-1. Download `YouTubeSmartDownloader.exe` from Releases when a release is available, or build it locally.
-2. Run the executable. It is unsigned, so Windows SmartScreen may ask you to verify its origin.
+1. Download the portable ZIP from [Releases](https://github.com/ipeidro-source/youtube-smart-downloader/releases) and extract it to keep the executable and its license/privacy documents together. The standalone `YouTubeSmartDownloader.exe` is also available.
+2. Run the executable. Existing releases are unsigned; check each release's signing status and the [Code signing policy](docs/CODE_SIGNING.md). Windows SmartScreen may ask you to verify its origin, including for newly signed releases.
 3. Startup checks yt-dlp, FFmpeg, ffprobe and Deno. If a tool is missing or unusable, install the listed dependencies or exit. FFmpeg includes ffprobe.
 4. Working tools let you continue even when updates are available or update information cannot be obtained. The **Update tools** button appears only for confirmed updates.
 5. Paste a YouTube link or select **Import links...**, choose the destination, language and quality, then select **Download**.
@@ -27,6 +27,8 @@ Only download content when you have the necessary rights or permission.
 Python is not required for the executable. yt-dlp, FFmpeg/ffprobe and Deno are external tools; they are not bundled. Windows with winget and an internet connection is required for automatic installation. Manual installation is also supported. Restart the app after installation or updates if PATH has changed.
 
 A Windows portable executable is distributed, not a setup wizard or MSI installer. Windows is the supported desktop platform. Linux CI checks shared Python logic; it does not provide a Linux release or GUI support guarantee.
+
+Author and copyright holder: **ipeidro** ([@ipeidro-source](https://github.com/ipeidro-source)). Support: [GitHub Issues](https://github.com/ipeidro-source/youtube-smart-downloader/issues). See [Privacy](docs/PRIVACY.md) for network activity and local data, and [Uninstallation](docs/UNINSTALL.md) for removing the application and optional external tools.
 
 ## Input files
 
@@ -51,10 +53,14 @@ Build and check the Windows executable:
 
 ```powershell
 python scripts/build_windows.py
+python scripts/check_windows_exe.py
 python scripts/smoke_windows.py
+python scripts/package_release.py
 ```
 
-The executable is written to `dist/YouTubeSmartDownloader.exe`. The startup smoke test creates a hidden UI, runs the event loop and checks CustomTkinter resources. It does not install/update tools, query update services, download videos or save preferences.
+The executable is written to `dist/YouTubeSmartDownloader.exe`. Its product name, author/CompanyName (`ipeidro`), description, copyright, internal/original filename, project/support links and versions are generated from `pyproject.toml`. Both numeric and readable PE versions are validated against the runtime version. These fields identify the application but do not replace an Authenticode signature.
+
+The build embeds and copies license, privacy, uninstallation and signing-policy documents. It collects installed third-party license texts without a network request. The startup smoke test creates a hidden UI, runs the event loop and checks CustomTkinter resources. It does not install/update tools, query update services, download videos or save preferences. Packaging adds a portable ZIP and SHA-256 hashes of the final executable and ZIP.
 
 The blue/cyan video-and-audio icon is shared by the window and executable. Its source and export instructions are in [assets/README.md](assets/README.md).
 
@@ -93,6 +99,12 @@ Pull request commits run Ruff, mypy, the full test suite and a Windows build/sta
 
 A push to `main`, including a merge, validates the integrated code and generates its executable artifact. Feature-branch push runs are omitted to avoid duplicating PR checks. Approval alone does not publish a release or merge code. Tags matching `v*` must agree with both package version declarations and reference a commit integrated into `main`. The release workflow reuses the complete CI workflow and publishes its tested Windows artifact only after all jobs succeed. No tag or release is created automatically by merging a PR. The same build/startup scripts are used locally and in CI. `requirements-dev.txt` pins the validated Python toolchain.
 
+SignPath integration is prepared and disabled until acceptance and certificate provisioning. When `SIGNPATH_ENABLED=true`, each production signature requires manual approval in SignPath, and a signing or verification failure prevents publication. The final signed EXE is tested and packaged without rebuilding it. Before activation, releases explicitly state that they are unsigned. See [SignPath setup](docs/SIGNPATH_SETUP.md).
+
+## Code signing policy
+
+The [Code signing policy](docs/CODE_SIGNING.md) documents ownership, approvers, signature checks and the pending SignPath status. The author name in Windows file properties is separate from the verified publisher displayed by Windows. No SignPath sponsorship or active certificate is claimed at this stage.
+
 ## Architecture
 
 - `core.py`: pure language, quality and download argument policies.
@@ -108,6 +120,6 @@ See [LIMITATIONS.md](docs/LIMITATIONS.md) for remaining limits and privacy detai
 
 ## Licenses and contribution
 
-The application source is [MIT licensed](LICENSE). This project is not affiliated with YouTube or Google. External tools retain their own licenses: [yt-dlp](https://github.com/yt-dlp/yt-dlp), [FFmpeg](https://ffmpeg.org/legal.html) and [Deno](https://deno.com/). CustomTkinter and Python dependencies retain their licenses. Review the conditions of the actual binaries before redistribution.
+The application source is [MIT licensed](LICENSE), copyright (c) 2026 ipeidro. This project is not affiliated with YouTube or Google. [Third-party components](docs/THIRD_PARTY.md) retain their licenses; full installed license texts are embedded in the executable and included in the portable ZIP. External tools retain their own licenses: [yt-dlp](https://github.com/yt-dlp/yt-dlp), [FFmpeg](https://ffmpeg.org/legal.html) and [Deno](https://deno.com/). Review the conditions of the actual binaries before redistribution.
 
 Report bugs with reproducible steps. Include tests for changes to audio selection and download behavior. Never commit credentials, session cookies or downloaded videos.

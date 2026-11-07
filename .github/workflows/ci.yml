@@ -5,6 +5,10 @@ on:
   pull_request:
   workflow_dispatch:
   workflow_call:
+    outputs:
+      windows-artifact-id:
+        description: ID of the tested unsigned Windows distribution
+        value: ${{ jobs.windows-executable.outputs.artifact-id }}
 permissions:
   contents: read
 concurrency:
@@ -62,6 +66,8 @@ jobs:
     timeout-minutes: 15
     needs: test
     runs-on: windows-latest
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -74,10 +80,20 @@ jobs:
       - run: python -m pip install -r requirements-dev.txt -e ".[dev]"
       - name: Build exe
         run: python scripts/build_windows.py
+      - name: Check executable metadata and notices
+        run: python scripts/check_windows_exe.py
       - name: Check exe startup
         run: python scripts/smoke_windows.py
       - uses: actions/upload-artifact@v4
+        id: upload
         with:
           name: YouTubeSmartDownloader-Windows-x64
-          path: dist/YouTubeSmartDownloader.exe
+          path: |
+            dist/YouTubeSmartDownloader.exe
+            dist/LICENSE.txt
+            dist/THIRD_PARTY_NOTICES.txt
+            dist/THIRD_PARTY_COMPONENTS.json
+            dist/PRIVACY.md
+            dist/UNINSTALL.md
+            dist/CODE_SIGNING.md
           if-no-files-found: error

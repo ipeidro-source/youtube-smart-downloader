@@ -4,13 +4,26 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "youtube-smart-downloader"
-version = "0.1.0"
+version = "0.1.1"
 description = "Windows desktop interface for yt-dlp with explicit audio language selection"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
-authors = [{name = "YouTube Smart Downloader contributors"}]
+authors = [{name = "ipeidro"}]
 dependencies = ["customtkinter>=5.2,<6"]
+
+[project.urls]
+Homepage = "https://github.com/ipeidro-source/youtube-smart-downloader"
+Repository = "https://github.com/ipeidro-source/youtube-smart-downloader"
+Issues = "https://github.com/ipeidro-source/youtube-smart-downloader/issues"
+"Code signing policy" = "https://github.com/ipeidro-source/youtube-smart-downloader/blob/main/docs/CODE_SIGNING.md"
+
+[tool.ytsd.windows]
+product-name = "YouTube Smart Downloader"
+file-description = "YouTube video and playlist downloader with explicit audio-language selection"
+copyright = "Copyright (c) 2026 ipeidro"
+internal-name = "YouTubeSmartDownloader"
+original-filename = "YouTubeSmartDownloader.exe"
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "ruff>=0.9,<1", "pyinstaller>=6,<7", "mypy>=1.14,<2", "Pillow>=11,<13"]

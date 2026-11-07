@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="YouTubeSmartDownloader.exe"
+             product-name="YouTube Smart Downloader"
+             company-name="ipeidro"
+             copyright="Copyright (c) 2026 ipeidro"
+             original-filename="YouTubeSmartDownloader.exe"
+             file-version="${version}"
+             product-version="${version}">
+      <authenticode-sign hash-algorithm="sha256" />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>
