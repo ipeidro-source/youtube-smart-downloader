@@ -14,6 +14,9 @@ def main() -> None:
     tag = os.environ.get("GITHUB_REF_NAME", "")
     if module["__version__"] != version or tag != "v" + version:
         raise SystemExit(f"Tag {tag!r} and both package versions must match v{version}")
+    if output := os.environ.get("GITHUB_OUTPUT"):
+        with Path(output).open("a", encoding="utf-8") as stream:
+            stream.write(f"version={version}\n")
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 
 ## Platform and dependencies
 
-Windows is the supported desktop platform. Linux CI validates shared logic, not a supported Linux desktop distribution. The Windows executable is portable and unsigned. It does not bundle yt-dlp, FFmpeg/ffprobe or Deno.
+Windows is the supported desktop platform. Linux CI validates shared logic, not a supported Linux desktop distribution. The Windows executable is portable. Existing releases are unsigned; SignPath is prepared but inactive pending acceptance and certificate provisioning. See the [Code signing policy](CODE_SIGNING.md). It does not bundle yt-dlp, FFmpeg/ffprobe or Deno.
 
 winget is required only for automatic maintenance. Working manually installed tools remain usable, but their update status may be unknown. Package catalogs may lag upstream releases. Query failures and unknown versions must not be reported as up to date. Update discovery uses timeouts and a cache; offline users can continue with working local tools.
 
@@ -28,11 +28,13 @@ Reports are incremental and session-specific. Insufficient disk space or permiss
 
 There is no application backend, account system or telemetry. YouTube URLs are sent to the services used by yt-dlp. Tool update queries contact winget sources. URLs, titles and signed media URLs may appear in local reports, logs and work files. No cookies, passwords or API keys are intentionally stored. Global yt-dlp configuration is ignored to preserve application policy.
 
+Startup update queries may run automatically; the application currently has no separate opt-out switch. The full [privacy policy](PRIVACY.md) describes network activity, third-party services, local storage and deletion. [Uninstallation](UNINSTALL.md) includes optional removal of separately installed tools.
+
 Only known YouTube HTTP(S) hosts are accepted. This validation is not an execution sandbox. Download content only when you have permission or the necessary rights.
 
 ## Future work
 
 - More extractor fixtures and original-audio evidence.
-- Optional code signing and an actual installer.
+- SignPath acceptance, account/certificate provisioning and production activation; an actual installer.
 - Better handling of changed playlists and archived files moved by the user.
 - An interprocess destination lock.
