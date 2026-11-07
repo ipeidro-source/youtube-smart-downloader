@@ -81,4 +81,14 @@ def load_release_metadata(root: Path) -> ReleaseMetadata:
     module = runpy.run_path(str(root / "src/youtube_smart_downloader/__init__.py"))
     if module["__version__"] != metadata.version:
         raise ValueError("pyproject.toml and __version__ must declare the same version")
+    for key, value in {
+        "APP_NAME": metadata.product,
+        "AUTHOR": metadata.company,
+        "COPYRIGHT": metadata.copyright,
+        "LICENSE_NAME": project["license"],
+        "PROJECT_URL": metadata.homepage,
+        "SUPPORT_URL": metadata.support,
+    }.items():
+        if module[key] != value:
+            raise ValueError(f"Runtime {key} differs from the Windows release identity")
     return metadata

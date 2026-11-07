@@ -9,16 +9,16 @@ concurrency:
   cancel-in-progress: false
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       version: ${{ steps.version.outputs.version }}
       signing-enabled: ${{ steps.signing.outputs.enabled }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7.1.0
         with:
           python-version: '3.12'
       - name: Check tag and version
@@ -64,7 +64,7 @@ jobs:
       actions: read
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Require signing token
         shell: pwsh
         env:
@@ -91,7 +91,7 @@ jobs:
         env:
           SIGNPATH_CERTIFICATE_SUBJECT: ${{ vars.SIGNPATH_CERTIFICATE_SUBJECT }}
         run: ./scripts/check_signature.ps1 -Executable signed/YouTubeSmartDownloader.exe -ExpectedSubject $env:SIGNPATH_CERTIFICATE_SUBJECT
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: YouTubeSmartDownloader-Windows-x64-Signed
           path: signed/*
@@ -109,14 +109,14 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
         with:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: requirements-dev.txt
       - run: python -m pip install -r requirements-dev.txt -e ".[dev]"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: ${{ needs.sign.result == 'success' && 'YouTubeSmartDownloader-Windows-x64-Signed' || 'YouTubeSmartDownloader-Windows-x64' }}
           path: dist
@@ -145,7 +145,7 @@ jobs:
 
           [Code signing policy](https://github.com/ipeidro-source/youtube-smart-downloader/blob/$env:GITHUB_SHA/docs/CODE_SIGNING.md)
           "@ | Set-Content -LiteralPath release-notes.md -Encoding utf8
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3.0.4
         with:
           files: |
             dist/YouTubeSmartDownloader.exe

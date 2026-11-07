@@ -14,6 +14,8 @@ from typing import Any
 
 import customtkinter as ctk
 
+from . import APP_NAME, __version__
+from .about import AboutWindow
 from .core import LANGUAGES, Preferences
 from .inputs import classify_url, parse_text_links
 from .engine import Cancelled, DownloadEngine
@@ -31,7 +33,8 @@ class App(ctk.CTk):
         self.tool_statuses: list[ToolStatus] = []
         self.check_event = threading.Event()
         self.check_worker: threading.Thread | None = None
-        self.title("YouTube Smart Downloader")
+        self._about_window: AboutWindow | None = None
+        self.title(APP_NAME)
         icon_directory = Path(__file__).with_name("assets")
         self._app_icon = tk.PhotoImage(file=str(icon_directory / "app-icon.png"))
         self.iconphoto(True, self._app_icon)
@@ -65,9 +68,12 @@ class App(ctk.CTk):
     def _build(self) -> None:
         container = ctk.CTkFrame(self, corner_radius=0)
         container.pack(fill="both", expand=True, padx=14, pady=14)
-        ctk.CTkLabel(
-            container, text="YouTube Smart Downloader", font=ctk.CTkFont(size=25, weight="bold")
-        ).pack(anchor="w", pady=(0, 4))
+        header = ctk.CTkFrame(container, fg_color="transparent")
+        header.pack(fill="x", pady=(0, 4))
+        ctk.CTkLabel(header, text=APP_NAME, font=ctk.CTkFont(size=25, weight="bold")).pack(
+            side="left"
+        )
+        ctk.CTkButton(header, text="About", width=80, command=self._show_about).pack(side="right")
         ctk.CTkLabel(container, text="YouTube link").pack(anchor="w")
         source_row = ctk.CTkFrame(container, fg_color="transparent")
         source_row.pack(fill="x", pady=(5, 4))
@@ -149,6 +155,15 @@ class App(ctk.CTk):
         self.log = ctk.CTkTextbox(container, height=115)
         self.log.pack(fill="both", expand=True)
         self.log.configure(state="disabled")
+
+    def _show_about(self) -> None:
+        if self.closing:
+            return
+        if self._about_window is not None and self._about_window.winfo_exists():
+            self._about_window.lift()
+            self._about_window.focus_set()
+            return
+        self._about_window = AboutWindow(self)
 
     def _begin_tool_check(self) -> None:
         if self.closing:
@@ -534,6 +549,13 @@ def main() -> None:
             assert "Video and playlist" in app.input_label.cget("text")
             assert app._app_icon.width() == 256
             assert (Path(__file__).with_name("assets") / "app-icon.ico").is_file()
+            app._show_about()
+            about = app._about_window
+            assert about is not None and about.winfo_exists()
+            about.withdraw()
+            assert about.version_label.cget("text") == f"Version {__version__}"
+            assert "Copyright (c) 2026 ipeidro" in about.notices.get("1.0", "end")
+            about.destroy()
             args.smoke_test.write_text(
                 json.dumps({"status": "ok", "title": app.title()}), encoding="utf-8"
             )
