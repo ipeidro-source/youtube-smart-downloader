@@ -4,15 +4,23 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 permissions:
   contents: read
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   test:
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [windows-latest]
         python-version: ['3.11', '3.12', '3.13']
+        include:
+          - os: ubuntu-latest
+            python-version: '3.12'
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -20,14 +28,38 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements-dev.txt
+            requirements-ci.txt
       - name: Install
-        run: python -m pip install -e ".[dev]"
+        run: python -m pip install -r requirements-ci.txt -e ".[dev]"
+      - name: Install FFmpeg and Tk on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg python3-tk
+      - name: Install FFmpeg on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue) -or -not (Get-Command ffprobe -ErrorAction SilentlyContinue)) {
+            choco install ffmpeg --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation failed' }
+          }
+      - name: Require media integration tools
+        run: python -c "import shutil; missing = [name for name in ('yt-dlp', 'ffmpeg', 'ffprobe') if not shutil.which(name)]; assert not missing, missing"
       - name: Lint
         run: ruff check .
+      - name: Format
+        run: ruff format --check .
+      - name: Types
+        run: python -m mypy
       - name: Tests
         run: pytest -q
 
   windows-executable:
+    timeout-minutes: 15
     needs: test
     runs-on: windows-latest
     steps:
@@ -35,9 +67,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install -e ".[dev]"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements-dev.txt
+      - run: python -m pip install -r requirements-dev.txt -e ".[dev]"
       - name: Build exe
-        run: pyinstaller --noconfirm --clean --onefile --windowed --name YouTubeSmartDownloader --paths src src/youtube_smart_downloader/__main__.py
+        run: python scripts/build_windows.py
+      - name: Check exe startup
+        run: python scripts/smoke_windows.py
       - uses: actions/upload-artifact@v4
         with:
           name: YouTubeSmartDownloader-Windows-x64

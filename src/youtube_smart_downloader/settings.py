@@ -3,6 +3,10 @@
 import json
 import os
 from pathlib import Path
+from typing import Any
+
+from .core import LANGUAGES, QUALITY
+from .storage import atomic_text
 
 
 def config_file() -> Path:
@@ -10,17 +14,32 @@ def config_file() -> Path:
     return base / "YouTubeSmartDownloader" / "settings.json"
 
 
-def load() -> dict:
+def normalize(data: dict[str, Any]) -> dict[str, Any]:
+    """Use the same validated values internally and in the visible controls."""
+    result = dict(data)
+    for key, values, default in (
+        ("language", LANGUAGES, "es"),
+        ("quality", QUALITY, "best"),
+        ("mode", {"video": None, "playlist": None}, "playlist"),
+        ("missing", {"skip": None, "fallback": None}, "skip"),
+    ):
+        if not isinstance(result.get(key), str) or result[key] not in values:
+            result[key] = default
+    if not isinstance(result.get("playlist_subfolder"), bool):
+        result["playlist_subfolder"] = True
+    if not isinstance(result.get("destination"), str) or not result["destination"].strip():
+        result["destination"] = str(Path.home() / "Downloads")
+    return result
+
+
+def load() -> dict[str, Any]:
     try:
         data = json.loads(config_file().read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
+        return normalize(data if isinstance(data, dict) else {})
     except (OSError, ValueError):
-        return {}
+        return normalize({})
 
 
-def save(settings: dict) -> None:
+def save(settings: dict[str, Any]) -> None:
     destination = config_file()
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_suffix(".tmp")
-    temporary.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
-    temporary.replace(destination)
+    atomic_text(destination, json.dumps(normalize(settings), ensure_ascii=False, indent=2))

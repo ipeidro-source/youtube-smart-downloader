@@ -1,34 +1,38 @@
-# Limitaciones y notas de seguridad — v0.1
+# Limitations and privacy
 
-## Selección de idioma
+## Platform and dependencies
 
-- El metadato de idioma de yt-dlp/YouTube no es una verificación de la voz escuchada.
-- `es-ES` exige metadato regional exacto; `es` acepta cualquier variante.
-- Si hay varias pistas etiquetadas en el idioma elegido, se escoge la de mayor bitrate reportado.
-- La opción «original» usa la nota `original` si existe y, si no, prefiere la pista del extractor. Este comportamiento no garantiza el idioma de origen.
-- Sin pista de vídeo independiente o sin audio individual, se omite el vídeo para evitar mezclar idiomas.
-- Si un vídeo desaparece, pasa a privado o YouTube limita la extracción, la aplicación informa del error y continúa.
+Windows is the supported desktop platform. Linux CI validates shared logic, not a supported Linux desktop distribution. The Windows executable is portable and unsigned. It does not bundle yt-dlp, FFmpeg/ffprobe or Deno.
 
-## Distribución y dependencias
+winget is required only for automatic maintenance. Working manually installed tools remain usable, but their update status may be unknown. Package catalogs may lag upstream releases. Query failures and unknown versions must not be reported as up to date. Update discovery uses timeouts and a cache; offline users can continue with working local tools.
 
-- La aplicación instala herramientas de terceros con `winget`, tras confirmación. No las descarga ni actualiza silenciosamente.
-- `yt-dlp` y FFmpeg pueden cambiar sus requisitos y licencias. Revisarlos antes de nuevas releases.
-- El `.exe` construido por CI **no está firmado** y puede activar SmartScreen.
-- El botón de instalación requiere `winget`; si no está disponible, hay que instalar dependencias manualmente.
-- No se incluyen las herramientas en el ejecutable para minimizar conflictos de licencia y facilitar sus actualizaciones.
+Cancelling installation stops the tracked process tree when Windows permits it. Already installed packages remain installed, and a separate elevated installer or Windows Installer service may continue. Recheck tool availability after interruption. Restart the application if PATH changed.
 
-## Privacidad y seguridad
+## Language and media
 
-- No tiene backend, cuentas, telemetría ni servicios propios.
-- Las URLs se envían a los servicios consultados por yt-dlp y pueden quedar en el historial local de la aplicación o archivos de descarga.
-- No se almacenan cookies, contraseñas ni claves API.
-- Se admiten solamente URLs HTTP(S) con dominios YouTube conocidos; esto no es un sandbox ni una garantía contra contenido malicioso.
-- Revisa el copyright y las condiciones del servicio antes de descargar contenido.
+Language labels are metadata, not recognition of the spoken language. Incorrect upstream labels cannot be detected reliably. Regional Spanish requires an explicit tag. Fallback tracks are unverified for the requested language. Original-track detection is limited to explicit extractor markers.
 
-## Mejoras posteriores
+Combined-only video/audio formats and active live streams are not downloaded. ffprobe checks structure, stream counts and duration; it cannot prove every frame is decodable or that the voice matches the selected language. Unknown format details are shown as unknown instead of inferred from technical IDs.
 
-- Pruebas de integración con fixtures del extractor y mocks de subprocess (sin realizar descargas reales en CI).
-- Detección más exhaustiva de audio original y diagnóstico detallado previo a descargas.
-- Actualizador opcional para herramientas externas y firma de código.
-- Mejor tratamiento de listas modificadas y detección de elementos ya presentes.
-- Internacionalización de la interfaz.
+## Inputs and resumption
+
+Video/playlist links are ambiguous when both identifiers are present; users choose the intended scope. TXT imports accept individual YouTube video links only. Invalid lines and duplicates require review before proceeding.
+
+Older partial files are not migrated into `.ytsd-work`. Resumption requires the same destination and compatible track identifiers/metadata. When automatic subfolders are enabled, changes to the video title, playlist title or TXT filename change the destination. Choose the previous folder and disable subfolders to reuse files already there. Expired media URLs require a retry with fresh metadata.
+
+The archive records one entry per provider/video ID, not per language or quality. It does not verify that an old file is still present or complete. Use separate destinations for different variants. Avoid concurrent application instances writing to one destination: output files are protected against overwrite, but the archive does not implement an interprocess lock.
+
+Reports are incremental and session-specific. Insufficient disk space or permissions can prevent persistence; the UI reports these errors. Existing reports and preferences remain local and are not rewritten merely to translate them.
+
+## Privacy
+
+There is no application backend, account system or telemetry. YouTube URLs are sent to the services used by yt-dlp. Tool update queries contact winget sources. URLs, titles and signed media URLs may appear in local reports, logs and work files. No cookies, passwords or API keys are intentionally stored. Global yt-dlp configuration is ignored to preserve application policy.
+
+Only known YouTube HTTP(S) hosts are accepted. This validation is not an execution sandbox. Download content only when you have permission or the necessary rights.
+
+## Future work
+
+- More extractor fixtures and original-audio evidence.
+- Optional code signing and an actual installer.
+- Better handling of changed playlists and archived files moved by the user.
+- An interprocess destination lock.
