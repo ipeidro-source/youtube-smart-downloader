@@ -84,6 +84,8 @@ jobs:
         run: python scripts/check_windows_exe.py
       - name: Check exe startup
         run: python scripts/smoke_windows.py
+      - name: Check portable release packaging
+        run: python scripts/package_release.py
       - uses: actions/upload-artifact@v4
         id: upload
         with:
@@ -93,6 +95,7 @@ jobs:
             dist/LICENSE.txt
             dist/THIRD_PARTY_NOTICES.txt
             dist/THIRD_PARTY_COMPONENTS.json
+            dist/THIRD_PARTY.md
             dist/PRIVACY.md
             dist/UNINSTALL.md
             dist/CODE_SIGNING.md

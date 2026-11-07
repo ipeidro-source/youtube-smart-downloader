@@ -17,7 +17,7 @@ def prepare_notices(root: Path, target: Path) -> None:
     """Keep full license texts from the installed build inputs, without network access."""
     target.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(root / "LICENSE", target / "LICENSE.txt")
-    for name in ("PRIVACY", "UNINSTALL", "CODE_SIGNING"):
+    for name in ("PRIVACY", "UNINSTALL", "CODE_SIGNING", "THIRD_PARTY"):
         shutil.copyfile(root / f"docs/{name}.md", target / f"{name}.md")
     sections = [
         (

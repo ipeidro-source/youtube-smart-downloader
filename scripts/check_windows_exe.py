@@ -42,6 +42,7 @@ def main() -> None:
         "LICENSE.txt",
         "THIRD_PARTY_NOTICES.txt",
         "THIRD_PARTY_COMPONENTS.json",
+        "THIRD_PARTY.md",
         "PRIVACY.md",
         "UNINSTALL.md",
         "CODE_SIGNING.md",

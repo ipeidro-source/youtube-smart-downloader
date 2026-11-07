@@ -100,7 +100,7 @@ jobs:
   publish:
     needs: [validate, build, sign]
     if: >-
-      always() &&
+      always() && !cancelled() &&
       needs.validate.result == 'success' && needs.build.result == 'success' &&
       (needs.sign.result == 'success' ||
        (needs.sign.result == 'skipped' && needs.validate.outputs.signing-enabled == 'false'))
