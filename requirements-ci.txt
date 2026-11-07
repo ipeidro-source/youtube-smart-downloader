@@ -1,0 +1,3 @@
+-r requirements-dev.txt
+# Match the yt-dlp release validated by the local offline media tests.
+yt-dlp==2026.10.26
