@@ -8,6 +8,7 @@ from unittest.mock import Mock
 import pytest
 
 from youtube_smart_downloader.app import App
+from youtube_smart_downloader.requests import DownloadRequest, TimeRange
 from youtube_smart_downloader.tools import SPECS, ToolStatus
 
 
@@ -122,11 +123,14 @@ def test_update_button_only_appears_for_confirmed_updates(update, visible):
 
 
 @pytest.mark.parametrize("choice,playlist", [(True, True), (False, False), (None, None)])
-def test_ambiguous_link_requires_scope_choice(monkeypatch, tmp_path, choice, playlist):
+@pytest.mark.parametrize("start,end", [("", ""), ("1", "3"), ("bad", "")])
+def test_ambiguous_link_requires_scope_choice(monkeypatch, tmp_path, choice, playlist, start, end):
     monkeypatch.setattr(
         "youtube_smart_downloader.app.messagebox.askyesnocancel", lambda *args: choice
     )
     engine = Mock()
+    error = Mock()
+    monkeypatch.setattr("youtube_smart_downloader.app.messagebox.showerror", error)
     monkeypatch.setattr("youtube_smart_downloader.app.DownloadEngine", lambda *args: engine)
     monkeypatch.setattr(
         "youtube_smart_downloader.app.threading.Thread",
@@ -140,6 +144,8 @@ def test_ambiguous_link_requires_scope_choice(monkeypatch, tmp_path, choice, pla
         tools_ready=True,
         worker=None,
         imported_links=[],
+        range_start=value(start),
+        range_end=value(end),
         url=value("https://www.youtube.com/watch?v=abcdefghijk&list=PL_test"),
         destination=value(str(tmp_path)),
         language=value("es"),
@@ -152,14 +158,19 @@ def test_ambiguous_link_requires_scope_choice(monkeypatch, tmp_path, choice, pla
         events=queue.Queue(),
     )
     App._start(app)
-    if choice is None:
+    if choice is None or (playlist and start) or start == "bad":
         engine.download.assert_not_called()
+        if choice is not None:
+            error.assert_called_once()
     else:
         assert engine.download.call_args.args[2] is playlist
-        assert engine.download.call_args.args[0] == (
+        expected = (
             "https://www.youtube.com/playlist?list=PL_test"
             if playlist
             else "https://www.youtube.com/watch?v=abcdefghijk"
+        )
+        assert engine.download.call_args.args[0] == (
+            DownloadRequest(expected, TimeRange(1, 3)) if start else expected
         )
 
 
@@ -179,7 +190,7 @@ def test_txt_import_requires_review_before_discarding_invalid_lines(monkeypatch,
     assert "1 invalid lines and 1 duplicates" in ask.call_args.args[1]
     ask.return_value = True
     App._import_links(app)
-    assert app.imported_links == ["https://www.youtube.com/watch?v=abcdefghijk"]
+    assert app.imported_links == [DownloadRequest("https://www.youtube.com/watch?v=abcdefghijk")]
     assert app.imported_name == "links"
 
 
@@ -218,8 +229,70 @@ def test_editing_the_input_clears_the_previous_txt_name():
     app = SimpleNamespace(
         imported_links=["old link"],
         imported_name="Old list",
+        range_start=Mock(),
+        range_end=Mock(),
+        start_entry=Mock(),
+        end_entry=Mock(),
         url=SimpleNamespace(get=lambda: "https://youtu.be/abcdefghijk"),
         input_label=Mock(),
     )
     App._input_changed(app)
     assert app.imported_name is None and app.imported_links == []
+    app.range_start.set.assert_called_once_with("")
+    app.range_end.set.assert_called_once_with("")
+    app.start_entry.configure.assert_called_with(state="normal")
+
+
+@pytest.mark.parametrize(
+    "url,state",
+    [
+        ("https://youtu.be/abcdefghijk", "normal"),
+        ("https://youtu.be/abcdefghijk?list=PL_test", "normal"),
+        ("https://www.youtube.com/playlist?list=PL_test", "disabled"),
+        ("TXT: links.txt", "disabled"),
+        ("invalid", "disabled"),
+    ],
+)
+def test_time_fields_follow_input_kind(url, state):
+    app = SimpleNamespace(
+        url=SimpleNamespace(get=lambda: url),
+        input_label=Mock(),
+        range_start=Mock(),
+        range_end=Mock(),
+        start_entry=Mock(),
+        end_entry=Mock(),
+    )
+    App._input_changed(app)
+    app.start_entry.configure.assert_called_with(state=state)
+    app.end_entry.configure.assert_called_with(state=state)
+    app.range_start.set.assert_called_once_with("")
+    app.range_end.set.assert_called_once_with("")
+
+
+def test_txt_import_keeps_ranges_and_disables_manual_fields(monkeypatch, tmp_path):
+    text_file = tmp_path / "clips.txt"
+    text_file.write_text(
+        "https://youtu.be/abcdefghijk;1;3\nhttps://youtu.be/abcdefghijk;3;", encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        "youtube_smart_downloader.app.filedialog.askopenfilename", lambda **kwargs: str(text_file)
+    )
+    app = SimpleNamespace(
+        _log=Mock(),
+        imported_links=[],
+        input_label=Mock(),
+        range_start=Mock(),
+        range_end=Mock(),
+        start_entry=Mock(),
+        end_entry=Mock(),
+    )
+
+    def set_source(text):
+        app.url.get = lambda: text
+        App._input_changed(app)
+
+    app.url = SimpleNamespace(set=set_source)
+    App._import_links(app)
+    assert [request.time_range for request in app.imported_links] == [TimeRange(1, 3), TimeRange(3)]
+    app.start_entry.configure.assert_called_with(state="disabled")
+    app.end_entry.configure.assert_called_with(state="disabled")

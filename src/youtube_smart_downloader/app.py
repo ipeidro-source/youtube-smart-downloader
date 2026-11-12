@@ -18,6 +18,7 @@ from . import APP_NAME, __version__
 from .about import AboutWindow
 from .core import LANGUAGES, Preferences
 from .inputs import classify_url, parse_text_links
+from .requests import DownloadRequest, parse_time_range
 from .engine import Cancelled, DownloadEngine
 from .settings import load, save
 from .tools import SPECS, ToolManager, ToolStatus
@@ -40,18 +41,20 @@ class App(ctk.CTk):
         self.iconphoto(True, self._app_icon)
         if os.name == "nt":
             self.iconbitmap(str(icon_directory / "app-icon.ico"))
-        self.geometry("760x720")
-        self.minsize(650, 650)
+        self.geometry("760x820")
+        self.minsize(700, 780)
         ctk.set_appearance_mode("System")
         data = load()
         self.events: queue.Queue[tuple[Any, ...]] = queue.Queue()
         self.worker: threading.Thread | None = None
         self.engine: DownloadEngine | None = None
         self.url = tk.StringVar(value="")
+        self.range_start = tk.StringVar(value="")
+        self.range_end = tk.StringVar(value="")
         self.destination = tk.StringVar(
             value=str(data.get("destination") or Path.home() / "Downloads")
         )
-        self.imported_links: list[str] = []
+        self.imported_links: list[DownloadRequest] = []
         self.imported_name: str | None = None
         self.language = tk.StringVar(value=str(data.get("language") or "es"))
         self.missing = tk.StringVar(value=str(data.get("missing") or "skip"))
@@ -88,6 +91,20 @@ class App(ctk.CTk):
             container, text="Paste a video or playlist link, or import a TXT file."
         )
         self.input_label.pack(anchor="w", pady=(0, 12))
+        times = ctk.CTkFrame(container, fg_color="transparent")
+        times.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(times, text="Start (optional)").pack(side="left")
+        self.start_entry = ctk.CTkEntry(times, textvariable=self.range_start, width=80)
+        self.start_entry.pack(side="left", padx=(6, 12))
+        ctk.CTkLabel(times, text="End (optional)").pack(side="left")
+        self.end_entry = ctk.CTkEntry(times, textvariable=self.range_end, width=80)
+        self.end_entry.pack(side="left", padx=(6, 12))
+        ctk.CTkLabel(
+            times,
+            text="Formats: SS, MM:SS or HH:MM:SS",
+        ).pack(side="left")
+        self.start_entry.configure(state="disabled")
+        self.end_entry.configure(state="disabled")
         ctk.CTkLabel(container, text="Destination folder").pack(anchor="w")
         row = ctk.CTkFrame(container, fg_color="transparent")
         row.pack(fill="x", pady=(5, 14))
@@ -237,8 +254,13 @@ class App(ctk.CTk):
     def _input_changed(self, *_args: str) -> None:
         self.imported_links = []
         self.imported_name = None
+        self.range_start.set("")
+        self.range_end.set("")
+        state = "disabled"
         try:
             source = classify_url(self.url.get())
+            if source.kind in {"video", "ambiguous"}:
+                state = "normal"
             label = {
                 "video": "Video detected",
                 "playlist": "Playlist detected",
@@ -247,6 +269,8 @@ class App(ctk.CTk):
         except ValueError:
             label = "Paste a video or playlist link, or import a TXT file."
         self.input_label.configure(text=label)
+        self.start_entry.configure(state=state)
+        self.end_entry.configure(state=state)
 
     def _import_links(self) -> None:
         filename = filedialog.askopenfilename(
@@ -276,7 +300,7 @@ class App(ctk.CTk):
         ):
             return
         self.url.set(f"TXT: {Path(filename).name}")
-        self.imported_links = imported.links
+        self.imported_links = imported.requests
         self.imported_name = Path(filename).stem
         self.input_label.configure(text=f"Imported {len(imported.links)} videos in file order")
 
@@ -325,7 +349,7 @@ class App(ctk.CTk):
     def _start(self) -> None:
         if not self.tools_ready or (self.worker and self.worker.is_alive()):
             return
-        url: str | list[str]
+        url: str | DownloadRequest | list[DownloadRequest]
         batch_name: str | None = None
         is_playlist = False
         if self.imported_links:
@@ -348,6 +372,17 @@ class App(ctk.CTk):
             else:
                 is_playlist = source.kind == "playlist"
             url = source.playlist_url if is_playlist else source.video_url
+            if is_playlist and (self.range_start.get().strip() or self.range_end.get().strip()):
+                messagebox.showerror("Time range", "Clear Start and End to download a playlist.")
+                return
+            if not is_playlist:
+                try:
+                    time_range = parse_time_range(self.range_start.get(), self.range_end.get())
+                except ValueError as exc:
+                    messagebox.showerror("Time range", str(exc))
+                    return
+                if time_range:
+                    url = DownloadRequest(url, time_range)
         folder = Path(self.destination.get().strip()).expanduser()
         if not str(self.destination.get()).strip():
             messagebox.showerror("Folder", "Choose a destination folder.")
@@ -547,6 +582,14 @@ def main() -> None:
             assert not app.install_button.winfo_manager()
             app.url.set("https://www.youtube.com/watch?v=abcdefghijk&list=PL_test")
             assert "Video and playlist" in app.input_label.cget("text")
+            assert app.start_entry.cget("state") == "normal"
+            app.range_start.set("01:30")
+            app.range_end.set("03:00")
+            app.url.set("https://www.youtube.com/playlist?list=PL_test")
+            assert app.start_entry.cget("state") == app.end_entry.cget("state") == "disabled"
+            assert app.range_start.get() == app.range_end.get() == ""
+            app.url.set("TXT: clips.txt")
+            assert app.start_entry.cget("state") == "disabled"
             assert app._app_icon.width() == 256
             assert (Path(__file__).with_name("assets") / "app-icon.ico").is_file()
             app._show_about()

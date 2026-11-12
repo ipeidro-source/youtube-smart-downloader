@@ -7,6 +7,7 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Any, TypedDict
+from .requests import TimeRange
 
 
 class DownloadReport(TypedDict):
@@ -65,3 +66,20 @@ def archive_video(directory: Path, video_id: str) -> None:
     archive = read_archive(directory)
     archive.add("youtube " + video_id)
     atomic_text(directory / ".ytsd-archive.txt", "\n".join(sorted(archive)) + "\n")
+
+
+def read_clip_archive(directory: Path) -> set[str]:
+    try:
+        return set((directory / ".ytsd-clips.txt").read_text(encoding="utf-8").splitlines())
+    except FileNotFoundError:
+        return set()
+
+
+def clip_key(video_id: str, time_range: TimeRange) -> str:
+    return f"youtube {video_id} {time_range.key}"
+
+
+def archive_clip(directory: Path, video_id: str, time_range: TimeRange) -> None:
+    archive = read_clip_archive(directory)
+    archive.add(clip_key(video_id, time_range))
+    atomic_text(directory / ".ytsd-clips.txt", "\n".join(sorted(archive)) + "\n")

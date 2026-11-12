@@ -8,6 +8,7 @@ from typing import Literal
 from urllib.parse import parse_qs, urlparse
 
 from .core import valid_youtube_url
+from .requests import DownloadRequest, parse_time_range
 
 
 @dataclass(frozen=True)
@@ -47,27 +48,35 @@ def classify_url(url: str) -> YouTubeInput:
 @dataclass
 class TextImport:
     links: list[str] = field(default_factory=list)
+    requests: list[DownloadRequest] = field(default_factory=list)
     issues: list[str] = field(default_factory=list)
     duplicates: list[str] = field(default_factory=list)
 
 
 def parse_text_links(text: str) -> TextImport:
     result = TextImport()
-    seen: dict[str, int] = {}
+    seen: dict[DownloadRequest, int] = {}
     for number, raw in enumerate(text.lstrip("\ufeff").splitlines(), 1):
         line = raw.strip()
         if not line or line.startswith(("#", ";", "]")):
             continue
         try:
-            source = classify_url(line)
+            columns = [column.strip() for column in line.split(";")]
+            if len(columns) not in {1, 3}:
+                raise ValueError("Expected URL or URL;start;end")
+            source = classify_url(columns[0])
             if source.kind != "video":
                 raise ValueError("TXT imports accept individual video links only")
+            request = DownloadRequest(
+                source.video_url, parse_time_range(*columns[1:]) if len(columns) == 3 else None
+            )
         except ValueError as exc:
             result.issues.append(f"Line {number}: {exc}: {line}")
             continue
-        if source.video_url in seen:
-            result.duplicates.append(f"Line {number}: same video as line {seen[source.video_url]}")
+        if request in seen:
+            result.duplicates.append(f"Line {number}: same video as line {seen[request]}")
         else:
-            seen[source.video_url] = number
+            seen[request] = number
             result.links.append(source.video_url)
+            result.requests.append(request)
     return result

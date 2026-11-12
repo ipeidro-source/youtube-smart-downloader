@@ -23,10 +23,14 @@ from .core import (
 )
 from .processes import Cancelled as Cancelled
 from .inputs import classify_url
+from .requests import DownloadRequest, TimeRange
 from .processes import ProcessRunner
 from .storage import (
     DownloadReport,
     archive_video,
+    archive_clip,
+    clip_key,
+    read_clip_archive,
     atomic_text,
     publish_file,
     read_archive,
@@ -108,7 +112,9 @@ class DownloadEngine:
             raise ValueError("Playlist entry has no valid link")
         return "https://www.youtube.com/watch?v=" + vid
 
-    def _verify_media(self, path: Path, expected_duration: float | None) -> None:
+    def _verify_media(
+        self, path: Path, expected_duration: float | None, *, clip: bool = False
+    ) -> None:
         if not path.is_file() or not path.stat().st_size:
             raise RuntimeError("No final MP4 was produced")
         output = self.runner.run(
@@ -127,6 +133,12 @@ class DownloadEngine:
             raise RuntimeError("The final file is not an MP4 container")
         if expected_duration and duration < expected_duration - max(2, expected_duration * 0.05):
             raise RuntimeError("The final file appears incomplete (shorter than expected)")
+        if (
+            clip
+            and expected_duration
+            and duration > expected_duration + max(2, expected_duration * 0.05)
+        ):
+            raise RuntimeError("The final fragment is longer than expected")
 
     def _download_one(
         self,
@@ -137,6 +149,7 @@ class DownloadEngine:
         report: DownloadReport,
         number: int,
         total: int,
+        time_range: TimeRange | None = None,
     ) -> None:
         metadata = self._metadata(video_url)
         video_id = str(metadata.get("id") or "")
@@ -147,7 +160,19 @@ class DownloadEngine:
             directory = self._source_directory(directory, title, prefs, report)
         item: dict[str, Any] = {"url": video_url, "id": video_id, "title": title}
         report["items"].append(item)
-        if "youtube " + video_id in read_archive(directory):
+        if time_range:
+            item["time_range"] = {"start": time_range.start, "end": time_range.end}
+            title += f" [{time_range.key}s]"
+        raw_duration = metadata.get("duration")
+        duration = float(raw_duration) if isinstance(raw_duration, (int, float)) else None
+        if time_range:
+            duration = time_range.duration(duration)
+        archived = (
+            clip_key(video_id, time_range) in read_clip_archive(directory)
+            if time_range
+            else "youtube " + video_id in read_archive(directory)
+        )
+        if archived:
             item.update(status="archived", reason="Already recorded in this folder's archive")
             report["archived"].append(title)
             self.status(f"Already archived: {title} (audio language is not rechecked)")
@@ -177,8 +202,6 @@ class DownloadEngine:
             return
         if metadata.get("is_live"):
             raise ValueError("Wait for the live stream to finish before downloading")
-        raw_duration = metadata.get("duration")
-        duration = float(raw_duration) if isinstance(raw_duration, (int, float)) else None
         selected_audio = next(f for f in formats if f.get("format_id") == choice.format_id)
         selected_video = next(f for f in formats if f.get("format_id") == video_format)
         item.update(
@@ -190,7 +213,12 @@ class DownloadEngine:
             for key in ("format_id", "language", "format_note", "acodec", "asr", "audio_channels")
         }
         profile = hashlib.sha256(
-            json.dumps([video_format, identity], sort_keys=True).encode()
+            json.dumps(
+                [video_format, identity, time_range.key]
+                if time_range
+                else [video_format, identity],
+                sort_keys=True,
+            ).encode()
         ).hexdigest()[:12]
         workdir = directory / ".ytsd-work" / f"{video_id}-{profile}"
         workdir.mkdir(parents=True, exist_ok=True)
@@ -198,7 +226,7 @@ class DownloadEngine:
         ready = False
         if staged.exists():
             try:
-                self._verify_media(staged, duration)
+                self._verify_media(staged, duration, **({"clip": True} if time_range else {}))
                 ready = True
             except Cancelled:
                 raise
@@ -235,11 +263,12 @@ class DownloadEngine:
                     prefs.quality,
                     index,
                     info_file=info_file,
+                    time_range=time_range,
                 ),
                 current=number,
                 total=total,
             )
-        self._verify_media(staged, duration)
+        self._verify_media(staged, duration, **({"clip": True} if time_range else {}))
         self.runner.check_cancelled()
         prefix = f"{index:03d} - " if index is not None else ""
         destination = directory / f"{prefix}{safe_name(title)} [{video_id}].mp4"
@@ -254,7 +283,10 @@ class DownloadEngine:
             video_format=video_format,
             audio_format=choice.format_id,
         )
-        archive_video(directory, video_id)
+        if time_range:
+            archive_clip(directory, video_id, time_range)
+        else:
+            archive_video(directory, video_id)
         report["downloaded"].append(f"{title}: {choice.detected_language} ({choice.reason})")
         try:
             shutil.rmtree(workdir)
@@ -263,7 +295,7 @@ class DownloadEngine:
 
     def download(
         self,
-        url: str | list[str],
+        url: str | DownloadRequest | list[str] | list[DownloadRequest],
         directory: Path,
         playlist: bool,
         prefs: Preferences,
@@ -271,12 +303,21 @@ class DownloadEngine:
         batch_name: str | None = None,
     ) -> DownloadReport:
         prefs.validate()
+        single_range = None
+        if isinstance(url, DownloadRequest):
+            single_range = url.time_range
+            if playlist and single_range:
+                raise ValueError("Playlists do not support time ranges")
+            url = url.url
+        requests: list[DownloadRequest] = []
         if isinstance(url, list):
             if playlist or not url:
                 raise ValueError("A batch must contain individual video links")
             for link in url:
-                if classify_url(link).kind != "video":
+                request = link if isinstance(link, DownloadRequest) else DownloadRequest(link)
+                if classify_url(request.url).kind != "video":
                     raise ValueError("A batch must contain individual video links")
+                requests.append(request)
         elif not valid_youtube_url(url):
             raise ValueError("Enter a valid YouTube HTTP(S) link")
         directory.mkdir(parents=True, exist_ok=True)
@@ -305,7 +346,10 @@ class DownloadEngine:
                 directory = self._source_directory(
                     directory, batch_name or "Imported videos", prefs, report
                 )
-                videos = [({"url": link}, i) for i, link in enumerate(url, 1)]
+                videos = [
+                    ({"url": request.url, "time_range": request.time_range}, i)
+                    for i, request in enumerate(requests, 1)
+                ]
             elif playlist:
                 self.status("Reading playlist…")
                 listing = self._metadata(url, flat=True)
@@ -317,16 +361,26 @@ class DownloadEngine:
                     raise RuntimeError("The playlist is empty or unavailable")
                 videos = [(entry, i) for i, entry in enumerate(entries, 1)]
             else:
-                videos = [({"url": url}, None)]
+                videos = [({"url": url, "time_range": single_range}, None)]
             for number, (entry, index) in enumerate(videos, 1):
                 self.runner.check_cancelled()
                 video_url = f"Entry {number}"
                 first_item = len(report["items"])
                 self.status(f"Analyzing video {number} of {len(videos)}…")
+                time_range = (
+                    entry.get("time_range") if isinstance(entry, dict) and not playlist else None
+                )
                 try:
                     video_url = self._video_url(entry)
                     self._download_one(
-                        video_url, index, directory, prefs, report, number, len(videos)
+                        video_url,
+                        index,
+                        directory,
+                        prefs,
+                        report,
+                        number,
+                        len(videos),
+                        time_range=time_range,
                     )
                 except Cancelled:
                     if len(report["items"]) > first_item:
@@ -337,9 +391,17 @@ class DownloadEngine:
                     if len(report["items"]) > first_item:
                         report["items"][-1].update(status="failed", error=str(exc))
                     else:
-                        report["items"].append(
-                            {"url": video_url, "status": "failed", "error": str(exc)}
-                        )
+                        failed_item: dict[str, Any] = {
+                            "url": video_url,
+                            "status": "failed",
+                            "error": str(exc),
+                        }
+                        if time_range:
+                            failed_item["time_range"] = {
+                                "start": time_range.start,
+                                "end": time_range.end,
+                            }
+                        report["items"].append(failed_item)
                     self.status(f"Video {number} failed: {exc}")
                 finally:
                     write_report(report)

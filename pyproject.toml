@@ -17,7 +17,6 @@ dependencies = ["customtkinter>=5.2,<6"]
 Homepage = "https://github.com/ipeidro-source/youtube-smart-downloader"
 Repository = "https://github.com/ipeidro-source/youtube-smart-downloader"
 Issues = "https://github.com/ipeidro-source/youtube-smart-downloader/issues"
-"Code signing policy" = "https://github.com/ipeidro-source/youtube-smart-downloader/blob/main/docs/CODE_SIGNING.md"
 
 [tool.ytsd.windows]
 product-name = "YouTube Smart Downloader"
