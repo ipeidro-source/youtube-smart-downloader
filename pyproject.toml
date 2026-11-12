@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "youtube-smart-downloader"
-version = "0.1.1"
+version = "0.1.2"
 description = "Windows desktop interface for yt-dlp with explicit audio language selection"
 readme = "README.md"
 requires-python = ">=3.11"
