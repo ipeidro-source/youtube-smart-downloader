@@ -8,6 +8,7 @@ import pytest
 from youtube_smart_downloader.core import Preferences
 from youtube_smart_downloader.engine import Cancelled, DownloadEngine
 from youtube_smart_downloader.storage import archive_video
+from youtube_smart_downloader.requests import DownloadRequest, TimeRange
 
 
 URL = "https://www.youtube.com/watch?v=abcdefghijk"
@@ -44,6 +45,112 @@ def fake_download(arguments, **kwargs):
     )
     (directory / (source["id"] + ".mp4")).write_bytes(b"fixture")
     return ""
+
+
+def test_clips_have_separate_archive_names_workdirs_and_expected_duration(
+    engine, monkeypatch, tmp_path
+):
+    archive_video(tmp_path, "abcdefghijk")
+    calls = []
+
+    def run(arguments, **kwargs):
+        calls.append(arguments)
+        assert "--force-keyframes-at-cuts" not in arguments
+        return fake_download(arguments)
+
+    verify = Mock()
+    monkeypatch.setattr(engine, "_run", run)
+    monkeypatch.setattr(engine, "_verify_media", verify)
+    prefs = Preferences(playlist_subfolder=False)
+    requests = [DownloadRequest(URL, TimeRange(1, 4)), DownloadRequest(URL, TimeRange(4))]
+    report = engine.download(requests, tmp_path, False, prefs)
+    assert len(report["downloaded"]) == 2
+    assert [args[args.index("--download-sections") + 1] for args in calls] == ["*1-4", "*4-inf"]
+    assert calls[0][calls[0].index("-P") + 1] != calls[1][calls[1].index("-P") + 1]
+    assert [call.args[1] for call in verify.call_args_list] == [3, 6]
+    assert all(call.kwargs == {"clip": True} for call in verify.call_args_list)
+    assert report["items"][0]["time_range"] == {"start": 1, "end": 4}
+    assert "1-4s" in report["items"][0]["output"]
+    assert (tmp_path / ".ytsd-archive.txt").read_text() == "youtube abcdefghijk\n"
+    again = engine.download(requests, tmp_path, False, prefs)
+    assert len(again["archived"]) == 2 and len(calls) == 2
+
+
+def test_clip_does_not_archive_full_video(engine, monkeypatch, tmp_path):
+    monkeypatch.setattr(engine, "_run", fake_download)
+    monkeypatch.setattr(engine, "_verify_media", Mock())
+    prefs = Preferences(playlist_subfolder=False)
+    report = engine.download(DownloadRequest(URL, TimeRange(1, 4)), tmp_path, False, prefs)
+    assert report["downloaded"]
+    assert not (tmp_path / ".ytsd-archive.txt").exists()
+    report = engine.download(URL, tmp_path, False, prefs)
+    assert report["downloaded"] and not report["archived"]
+
+
+@pytest.mark.parametrize(
+    "duration,time_range",
+    [
+        (None, TimeRange(1)),
+        (0, TimeRange(1)),
+        (float("nan"), TimeRange(1)),
+        (10, TimeRange(10)),
+        (10, TimeRange(0, 11)),
+    ],
+)
+def test_invalid_clip_bounds_fail_before_downloading(
+    engine, monkeypatch, tmp_path, duration, time_range
+):
+    engine._metadata.return_value["duration"] = duration
+    run = Mock()
+    monkeypatch.setattr(engine, "_run", run)
+    report = engine.download(DownloadRequest(URL, time_range), tmp_path, False, Preferences())
+    assert report["failed"] and not report["downloaded"]
+    assert report["items"][0]["time_range"]["start"] == time_range.start
+    run.assert_not_called()
+
+
+def test_invalid_clip_does_not_stop_batch(engine, monkeypatch, tmp_path):
+    monkeypatch.setattr(engine, "_run", fake_download)
+    monkeypatch.setattr(engine, "_verify_media", Mock())
+    report = engine.download(
+        [DownloadRequest(URL, TimeRange(10)), DownloadRequest(URL, TimeRange(1, 3))],
+        tmp_path,
+        False,
+        Preferences(),
+    )
+    assert len(report["failed"]) == len(report["downloaded"]) == 1
+
+
+def test_playlist_range_rejected(engine, tmp_path):
+    with pytest.raises(ValueError, match="Playlists"):
+        engine.download(DownloadRequest(URL, TimeRange(1)), tmp_path, True, Preferences())
+
+
+def test_failed_metadata_keeps_requested_range_in_report(engine, tmp_path):
+    engine._metadata.side_effect = RuntimeError("Unavailable video")
+    report = engine.download(DownloadRequest(URL, TimeRange(1, 3)), tmp_path, False, Preferences())
+    assert report["items"][0]["time_range"] == {"start": 1, "end": 3}
+
+
+@pytest.mark.parametrize("duration,expected,valid", [(3, 1, True), (10, 1, False), (1, 10, False)])
+def test_clip_verification_tolerates_fast_cuts_but_rejects_wrong_duration(
+    engine, tmp_path, duration, expected, valid
+):
+    path = tmp_path / "clip.mp4"
+    path.write_bytes(b"fixture")
+    engine.runner.run = Mock(
+        return_value=json.dumps(
+            {
+                "streams": [{"codec_type": "video"}, {"codec_type": "audio"}],
+                "format": {"duration": duration, "format_name": "mov,mp4"},
+            }
+        )
+    )
+    if valid:
+        engine._verify_media(path, expected, clip=True)
+    else:
+        with pytest.raises(RuntimeError):
+            engine._verify_media(path, expected, clip=True)
 
 
 def test_success_requires_validation_before_archive(engine, monkeypatch, tmp_path):

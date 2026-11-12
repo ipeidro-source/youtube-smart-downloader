@@ -4,7 +4,6 @@ import ast
 from dataclasses import replace
 from pathlib import Path
 import shutil
-from xml.etree import ElementTree
 
 import pytest
 
@@ -43,23 +42,3 @@ def test_build_rejects_runtime_version_different_from_package(tmp_path):
     module.write_text('__version__ = "999.0.0"', encoding="utf-8")
     with pytest.raises(ValueError, match="same version"):
         load_release_metadata(tmp_path)
-
-
-def test_signpath_configuration_restricts_signing_to_matching_application_identity():
-    metadata = load_release_metadata(ROOT)
-    configuration = ElementTree.parse(ROOT / ".github/signpath/artifact-configuration.xml")
-    ns = {"s": "http://signpath.io/artifact-configuration/v1"}
-    files = configuration.findall(".//s:pe-file", ns)
-    assert len(files) == 1
-    application = files[0]
-    assert application.attrib == {
-        "path": metadata.filename,
-        "product-name": metadata.product,
-        "company-name": metadata.company,
-        "copyright": metadata.copyright,
-        "original-filename": metadata.filename,
-        "file-version": "${version}",
-        "product-version": "${version}",
-    }
-    directive = application.find("s:authenticode-sign", ns)
-    assert directive is not None and directive.get("hash-algorithm") == "sha256"

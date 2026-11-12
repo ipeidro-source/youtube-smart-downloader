@@ -17,7 +17,6 @@ def package_release(directory: Path, version: str) -> tuple[Path, Path]:
         "THIRD_PARTY.md",
         "PRIVACY.md",
         "UNINSTALL.md",
-        "CODE_SIGNING.md",
     )
     for name in names:
         if not (directory / name).is_file():

@@ -13,7 +13,6 @@ jobs:
     timeout-minutes: 5
     outputs:
       version: ${{ steps.version.outputs.version }}
-      signing-enabled: ${{ steps.signing.outputs.enabled }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -26,84 +25,13 @@ jobs:
         run: python scripts/check_release.py
       - name: Require a commit integrated into main
         run: git merge-base --is-ancestor HEAD origin/main
-      - name: Check signing activation settings
-        id: signing
-        env:
-          SIGNPATH_ENABLED: ${{ vars.SIGNPATH_ENABLED }}
-          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
-          SIGNPATH_CERTIFICATE_SUBJECT: ${{ vars.SIGNPATH_CERTIFICATE_SUBJECT }}
-        run: |
-          python - <<'PY'
-          import os
-          from pathlib import Path
-          enabled = os.environ.get('SIGNPATH_ENABLED', '')
-          if enabled not in ('', 'false', 'true'):
-              raise SystemExit('SIGNPATH_ENABLED must be true, false or unset')
-          if enabled == 'true':
-              required = ('SIGNPATH_ORGANIZATION_ID', 'SIGNPATH_PROJECT_SLUG',
-                          'SIGNPATH_SIGNING_POLICY_SLUG', 'SIGNPATH_CERTIFICATE_SUBJECT')
-              missing = [name for name in required if not os.environ.get(name, '').strip()]
-              if missing:
-                  raise SystemExit('Missing signing variables: ' + ', '.join(missing))
-          with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
-              output.write('enabled=' + ('true' if enabled == 'true' else 'false') + '\n')
-          PY
 
   build:
     needs: validate
     uses: ./.github/workflows/ci.yml
 
-  sign:
-    needs: [validate, build]
-    if: needs.validate.outputs.signing-enabled == 'true'
-    runs-on: windows-latest
-    timeout-minutes: 70
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - name: Require signing token
-        shell: pwsh
-        env:
-          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:SIGNPATH_API_TOKEN)) {
-            throw 'SIGNPATH_API_TOKEN is required when signing is enabled'
-          }
-      - name: Submit tested artifact for manual signing approval
-        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
-          github-artifact-id: ${{ needs.build.outputs.windows-artifact-id }}
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 3600
-          output-artifact-directory: signed
-          parameters: |
-            version: ${{ toJSON(needs.validate.outputs.version) }}
-      - name: Verify trusted publisher and timestamp
-        shell: pwsh
-        env:
-          SIGNPATH_CERTIFICATE_SUBJECT: ${{ vars.SIGNPATH_CERTIFICATE_SUBJECT }}
-        run: ./scripts/check_signature.ps1 -Executable signed/YouTubeSmartDownloader.exe -ExpectedSubject $env:SIGNPATH_CERTIFICATE_SUBJECT
-      - uses: actions/upload-artifact@v7.0.2
-        with:
-          name: YouTubeSmartDownloader-Windows-x64-Signed
-          path: signed/*
-          if-no-files-found: error
-
   publish:
-    needs: [validate, build, sign]
-    if: >-
-      always() && !cancelled() &&
-      needs.validate.result == 'success' && needs.build.result == 'success' &&
-      (needs.sign.result == 'success' ||
-       (needs.sign.result == 'skipped' && needs.validate.outputs.signing-enabled == 'false'))
+    needs: [validate, build]
     runs-on: windows-latest
     timeout-minutes: 15
     permissions:
@@ -118,39 +46,20 @@ jobs:
       - run: python -m pip install -r requirements-dev.txt -e ".[dev]"
       - uses: actions/download-artifact@v8.0.2
         with:
-          name: ${{ needs.sign.result == 'success' && 'YouTubeSmartDownloader-Windows-x64-Signed' || 'YouTubeSmartDownloader-Windows-x64' }}
+          name: YouTubeSmartDownloader-Windows-x64
           path: dist
-      - name: Verify final signature when enabled
-        if: needs.validate.outputs.signing-enabled == 'true'
-        shell: pwsh
-        env:
-          SIGNPATH_CERTIFICATE_SUBJECT: ${{ vars.SIGNPATH_CERTIFICATE_SUBJECT }}
-        run: ./scripts/check_signature.ps1 -Executable dist/YouTubeSmartDownloader.exe -ExpectedSubject $env:SIGNPATH_CERTIFICATE_SUBJECT
       - name: Check final executable metadata and notices
         run: python scripts/check_windows_exe.py
       - name: Check final executable startup
         run: python scripts/smoke_windows.py
       - name: Package final executable and hash release files
         run: python scripts/package_release.py
-      - name: Prepare release signing information
-        shell: pwsh
-        env:
-          SIGNING_ENABLED: ${{ needs.validate.outputs.signing-enabled }}
-        run: |
-          $status = if ($env:SIGNING_ENABLED -eq 'true') { 'Digitally signed through SignPath after manual approval.' } else { 'This release is unsigned. SignPath production signing has not been activated.' }
-          @"
-          $status
-
-          The portable ZIP includes the executable, licenses, privacy policy and uninstallation instructions. SHA256SUMS.txt covers the final EXE and ZIP.
-
-          [Code signing policy](https://github.com/ipeidro-source/youtube-smart-downloader/blob/$env:GITHUB_SHA/docs/CODE_SIGNING.md)
-          "@ | Set-Content -LiteralPath release-notes.md -Encoding utf8
       - uses: softprops/action-gh-release@v3.0.4
         with:
           files: |
             dist/YouTubeSmartDownloader.exe
             dist/YouTubeSmartDownloader-*-Windows-x64.zip
             dist/SHA256SUMS.txt
-          body_path: release-notes.md
+          body: The portable ZIP includes the executable, licenses, privacy policy and uninstallation instructions. SHA256SUMS.txt covers the final EXE and ZIP.
           generate_release_notes: true
           fail_on_unmatched_files: true

@@ -16,8 +16,19 @@ from youtube_smart_downloader.release_metadata import load_release_metadata
 def prepare_notices(root: Path, target: Path) -> None:
     """Keep full license texts from the installed build inputs, without network access."""
     target.mkdir(parents=True, exist_ok=True)
+    expected = {
+        "LICENSE.txt",
+        "PRIVACY.md",
+        "UNINSTALL.md",
+        "THIRD_PARTY.md",
+        "THIRD_PARTY_NOTICES.txt",
+        "THIRD_PARTY_COMPONENTS.json",
+    }
+    for item in target.iterdir():
+        if item.is_file() and item.name not in expected:
+            item.unlink()
     shutil.copyfile(root / "LICENSE", target / "LICENSE.txt")
-    for name in ("PRIVACY", "UNINSTALL", "CODE_SIGNING", "THIRD_PARTY"):
+    for name in ("PRIVACY", "UNINSTALL", "THIRD_PARTY"):
         shutil.copyfile(root / f"docs/{name}.md", target / f"{name}.md")
     sections = [
         (

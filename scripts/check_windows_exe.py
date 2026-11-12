@@ -45,7 +45,6 @@ def main() -> None:
         "THIRD_PARTY.md",
         "PRIVACY.md",
         "UNINSTALL.md",
-        "CODE_SIGNING.md",
     ):
         archive_key = next(
             (key for key in archive.toc if key.replace("\\", "/") == f"release-docs/{name}"), None

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+from .requests import TimeRange
 
 
 LANGUAGES = {
@@ -243,6 +244,7 @@ def download_args(
     index: int | None,
     *,
     info_file: Path | None = None,
+    time_range: TimeRange | None = None,
 ) -> list[str]:
     """Explicit formats prevent accidentally choosing a different language."""
     if not video_id or not audio_id:
@@ -252,6 +254,7 @@ def download_args(
         raise ValueError("Unknown quality")
     return [
         "--no-playlist",
+        *(["--download-sections", "*" + time_range.key] if time_range else []),
         "--newline",
         "--continue",
         "--no-overwrites",

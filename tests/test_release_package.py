@@ -1,4 +1,4 @@
-"""Check the final distribution's contents and hashes, independent of signing."""
+"""Check the final distribution's contents and hashes."""
 
 import hashlib
 from pathlib import Path
@@ -19,12 +19,11 @@ FILES = (
     "THIRD_PARTY.md",
     "PRIVACY.md",
     "UNINSTALL.md",
-    "CODE_SIGNING.md",
 )
 
 
 def test_portable_package_preserves_final_executable_and_publishes_matching_hashes(tmp_path):
-    final_binary = b"final signed executable content\0\xff"
+    final_binary = b"final executable content\0\xff"
     for name in FILES:
         (tmp_path / name).write_bytes(final_binary if name.endswith(".exe") else name.encode())
     bundle, checksums = PACKAGE_RELEASE(tmp_path, "1.2.3")

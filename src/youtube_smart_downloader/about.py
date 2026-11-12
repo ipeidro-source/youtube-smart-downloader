@@ -57,7 +57,6 @@ class AboutWindow(ctk.CTkToplevel):
                 ("Project", PROJECT_URL),
                 ("Support", SUPPORT_URL),
                 ("Privacy", PROJECT_URL + "/blob/main/docs/PRIVACY.md"),
-                ("Code signing policy", PROJECT_URL + "/blob/main/docs/CODE_SIGNING.md"),
             )
         ):
             ctk.CTkButton(

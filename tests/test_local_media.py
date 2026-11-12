@@ -1,6 +1,7 @@
 """Offline integration: real yt-dlp + FFmpeg + ffprobe, synthetic media over loopback."""
 
 import functools
+from array import array
 import json
 import re
 import shutil
@@ -14,6 +15,7 @@ import pytest
 
 from youtube_smart_downloader.core import Preferences
 from youtube_smart_downloader.engine import Cancelled, DownloadEngine
+from youtube_smart_downloader.requests import DownloadRequest, TimeRange
 
 
 pytestmark = pytest.mark.skipif(
@@ -41,6 +43,8 @@ def media(tmp_path):
             "-an",
             "-c:v",
             "libx264",
+            "-g",
+            "12",
             "-preset",
             "ultrafast",
             str(tmp_path / "video.mp4"),
@@ -206,3 +210,57 @@ def test_probe_rejects_audio_only_output(monkeypatch, media, tmp_path):
     engine = DownloadEngine(Mock(), Mock())
     with pytest.raises(RuntimeError, match="exactly one"):
         engine._verify_media(tmp_path / "es.m4a", 3)
+
+
+@pytest.mark.parametrize("time_range", [TimeRange(1, 2), TimeRange(1), TimeRange(0, 2)])
+def test_real_local_time_ranges(monkeypatch, media, tmp_path, time_range):
+    engine = local_engine(monkeypatch, media)
+    report = engine.download(
+        DownloadRequest(URL, time_range), tmp_path / "clips", False, Preferences(language="es")
+    )
+    assert report["downloaded"], report
+    item = report["items"][0]
+    assert item["audio_format"] == "es"
+    output = Path(item["output"])
+    probe = json.loads(
+        subprocess.run(
+            ["ffprobe", "-v", "error", "-show_format", "-show_streams", "-of", "json", str(output)],
+            capture_output=True,
+            check=True,
+            timeout=15,
+        ).stdout
+    )
+    assert abs(float(probe["format"]["duration"]) - time_range.duration(3)) < 0.6
+    assert sorted(s["codec_type"] for s in probe["streams"]) == ["audio", "video"]
+    # Decode the actual output to catch malformed packets or an unplayable cut.
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(output), "-f", "null", "-"],
+        check=True,
+        capture_output=True,
+        timeout=15,
+    )
+    pcm = subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(output),
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "8000",
+            "-f",
+            "s16le",
+            "-",
+        ],
+        check=True,
+        capture_output=True,
+        timeout=15,
+    ).stdout
+    samples = array("h", pcm)
+    crossings = sum(a <= 0 < b for a, b in zip(samples, samples[1:]))
+    frequency = crossings / (len(samples) / 8000)
+    assert 430 < frequency < 450, "The clip must contain Spanish 440Hz, not English 880Hz"
+    assert not (Path(report["directory"]) / ".ytsd-archive.txt").exists()

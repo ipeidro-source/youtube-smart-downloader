@@ -7,7 +7,7 @@ on:
   workflow_call:
     outputs:
       windows-artifact-id:
-        description: ID of the tested unsigned Windows distribution
+        description: ID of the tested Windows distribution
         value: ${{ jobs.windows-executable.outputs.artifact-id }}
 permissions:
   contents: read
@@ -98,5 +98,4 @@ jobs:
             dist/THIRD_PARTY.md
             dist/PRIVACY.md
             dist/UNINSTALL.md
-            dist/CODE_SIGNING.md
           if-no-files-found: error
