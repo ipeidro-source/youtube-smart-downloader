@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "youtube-smart-downloader"
-version = "0.1.2"
-description = "Windows desktop interface for yt-dlp with explicit audio language selection"
+version = "0.2.0"
+description = "Windows desktop downloader with multiple audio tracks and embedded subtitles"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -20,7 +20,7 @@ Issues = "https://github.com/ipeidro-source/youtube-smart-downloader/issues"
 
 [tool.ytsd.windows]
 product-name = "YouTube Smart Downloader"
-file-description = "YouTube video and playlist downloader with explicit audio-language selection"
+file-description = "YouTube video and playlist downloader with selectable audio and embedded subtitles"
 copyright = "Copyright (c) 2026 ipeidro"
 internal-name = "YouTubeSmartDownloader"
 original-filename = "YouTubeSmartDownloader.exe"

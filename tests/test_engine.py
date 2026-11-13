@@ -30,6 +30,11 @@ METADATA = {
 }
 
 
+def mp4_preferences(**kwargs):
+    # These regression fixtures exercise the original MP4 download/recovery path.
+    return Preferences(container="mp4", **kwargs)
+
+
 @pytest.fixture
 def engine(monkeypatch):
     instance = DownloadEngine(Mock(), Mock())
@@ -61,7 +66,7 @@ def test_clips_have_separate_archive_names_workdirs_and_expected_duration(
     verify = Mock()
     monkeypatch.setattr(engine, "_run", run)
     monkeypatch.setattr(engine, "_verify_media", verify)
-    prefs = Preferences(playlist_subfolder=False)
+    prefs = mp4_preferences(playlist_subfolder=False)
     requests = [DownloadRequest(URL, TimeRange(1, 4)), DownloadRequest(URL, TimeRange(4))]
     report = engine.download(requests, tmp_path, False, prefs)
     assert len(report["downloaded"]) == 2
@@ -79,7 +84,7 @@ def test_clips_have_separate_archive_names_workdirs_and_expected_duration(
 def test_clip_does_not_archive_full_video(engine, monkeypatch, tmp_path):
     monkeypatch.setattr(engine, "_run", fake_download)
     monkeypatch.setattr(engine, "_verify_media", Mock())
-    prefs = Preferences(playlist_subfolder=False)
+    prefs = mp4_preferences(playlist_subfolder=False)
     report = engine.download(DownloadRequest(URL, TimeRange(1, 4)), tmp_path, False, prefs)
     assert report["downloaded"]
     assert not (tmp_path / ".ytsd-archive.txt").exists()
@@ -103,7 +108,7 @@ def test_invalid_clip_bounds_fail_before_downloading(
     engine._metadata.return_value["duration"] = duration
     run = Mock()
     monkeypatch.setattr(engine, "_run", run)
-    report = engine.download(DownloadRequest(URL, time_range), tmp_path, False, Preferences())
+    report = engine.download(DownloadRequest(URL, time_range), tmp_path, False, mp4_preferences())
     assert report["failed"] and not report["downloaded"]
     assert report["items"][0]["time_range"]["start"] == time_range.start
     run.assert_not_called()
@@ -116,19 +121,21 @@ def test_invalid_clip_does_not_stop_batch(engine, monkeypatch, tmp_path):
         [DownloadRequest(URL, TimeRange(10)), DownloadRequest(URL, TimeRange(1, 3))],
         tmp_path,
         False,
-        Preferences(),
+        mp4_preferences(),
     )
     assert len(report["failed"]) == len(report["downloaded"]) == 1
 
 
 def test_playlist_range_rejected(engine, tmp_path):
     with pytest.raises(ValueError, match="Playlists"):
-        engine.download(DownloadRequest(URL, TimeRange(1)), tmp_path, True, Preferences())
+        engine.download(DownloadRequest(URL, TimeRange(1)), tmp_path, True, mp4_preferences())
 
 
 def test_failed_metadata_keeps_requested_range_in_report(engine, tmp_path):
     engine._metadata.side_effect = RuntimeError("Unavailable video")
-    report = engine.download(DownloadRequest(URL, TimeRange(1, 3)), tmp_path, False, Preferences())
+    report = engine.download(
+        DownloadRequest(URL, TimeRange(1, 3)), tmp_path, False, mp4_preferences()
+    )
     assert report["items"][0]["time_range"] == {"start": 1, "end": 3}
 
 
@@ -161,7 +168,7 @@ def test_success_requires_validation_before_archive(engine, monkeypatch, tmp_pat
         assert not (tmp_path / ".ytsd-archive.txt").exists()
 
     monkeypatch.setattr(engine, "_verify_media", verify)
-    report = engine.download(URL, tmp_path, False, Preferences(playlist_subfolder=False))
+    report = engine.download(URL, tmp_path, False, mp4_preferences(playlist_subfolder=False))
     assert len(report["downloaded"]) == 1
     assert report["state"] == "completed"
     assert (tmp_path / "Sample [abcdefghijk].mp4").read_bytes() == b"fixture"
@@ -179,7 +186,7 @@ def test_failures_are_not_archived(engine, monkeypatch, tmp_path, failure):
     monkeypatch.setattr(engine, "_run", run)
     if failure == "probe":
         monkeypatch.setattr(engine, "_verify_media", Mock(side_effect=RuntimeError("invalid")))
-    report = engine.download(URL, tmp_path, False, Preferences(playlist_subfolder=False))
+    report = engine.download(URL, tmp_path, False, mp4_preferences(playlist_subfolder=False))
     assert report["state"] == "completed_with_errors"
     assert report["failed"] and not report["downloaded"]
     assert not (tmp_path / ".ytsd-archive.txt").exists()
@@ -189,7 +196,7 @@ def test_failures_are_not_archived(engine, monkeypatch, tmp_path, failure):
 def test_archived_video_is_not_claimed_as_a_new_download(engine, tmp_path):
     archive_video(tmp_path, "abcdefghijk")
     report = engine.download(
-        URL, tmp_path, False, Preferences(language="es-ES", playlist_subfolder=False)
+        URL, tmp_path, False, mp4_preferences(language="es-ES", playlist_subfolder=False)
     )
     assert report["archived"] == ["Sample"]
     assert not report["downloaded"]
@@ -199,7 +206,7 @@ def test_archived_video_is_not_claimed_as_a_new_download(engine, tmp_path):
 def test_cancelled_before_start_never_fetches_metadata(engine, tmp_path):
     engine.cancel()
     with pytest.raises(Cancelled):
-        engine.download(URL, tmp_path, False, Preferences(playlist_subfolder=False))
+        engine.download(URL, tmp_path, False, mp4_preferences(playlist_subfolder=False))
     engine._metadata.assert_not_called()
     assert json.loads((tmp_path / "download-report.json").read_text())["state"] == "cancelled"
 
@@ -215,7 +222,7 @@ def test_cancel_keeps_previous_results_and_session_reports(engine, monkeypatch, 
     monkeypatch.setattr(engine, "_verify_media", lambda *args: None)
     engine.progress = lambda *args: engine.cancel()
     with pytest.raises(Cancelled):
-        engine.download(URL, tmp_path, True, Preferences(playlist_subfolder=False))
+        engine.download(URL, tmp_path, True, mp4_preferences(playlist_subfolder=False))
     report = json.loads((tmp_path / "download-report.json").read_text(encoding="utf-8"))
     assert report["state"] == "cancelled" and len(report["downloaded"]) == 1
     first_path = Path(report["report_path"])
@@ -223,7 +230,7 @@ def test_cancel_keeps_previous_results_and_session_reports(engine, monkeypatch, 
     other = DownloadEngine(Mock(), Mock())
     monkeypatch.setattr(other, "missing_tools", lambda: ["fixture"])
     with pytest.raises(RuntimeError):
-        other.download(URL, tmp_path, False, Preferences(playlist_subfolder=False))
+        other.download(URL, tmp_path, False, mp4_preferences(playlist_subfolder=False))
     assert json.loads(first_path.read_text(encoding="utf-8"))["state"] == "cancelled"
 
 
@@ -235,7 +242,7 @@ def test_invalid_playlist_entries_do_not_abort_remaining_items(engine, monkeypat
 
     monkeypatch.setattr(engine, "_metadata", metadata)
     report = engine.download(
-        URL, tmp_path, True, Preferences(language="es-ES", playlist_subfolder=False)
+        URL, tmp_path, True, mp4_preferences(language="es-ES", playlist_subfolder=False)
     )
     assert len(report["failed"]) == 2 and len(report["omitted"]) == 1
     assert engine.progress.call_args.args == (3, 3, "100%")
@@ -245,7 +252,7 @@ def test_fallback_does_not_verify_requested_language(engine, monkeypatch, tmp_pa
     monkeypatch.setattr(engine, "_run", fake_download)
     monkeypatch.setattr(engine, "_verify_media", lambda *args: None)
     report = engine.download(
-        URL, tmp_path, False, Preferences(language="es-ES", missing="fallback")
+        URL, tmp_path, False, mp4_preferences(language="es-ES", missing="fallback")
     )
     item = report["items"][0]
     assert item["audio_language"] == "en"
@@ -261,11 +268,11 @@ def test_resume_workdir_survives_title_and_index_changes(engine, monkeypatch, tm
 
     monkeypatch.setattr(engine, "_run", run)
     with pytest.raises(Cancelled):
-        engine.download(URL, tmp_path, False, Preferences(playlist_subfolder=False))
+        engine.download(URL, tmp_path, False, mp4_preferences(playlist_subfolder=False))
     engine._metadata.return_value["title"] = "Changed title"
     # A fresh engine is required only if its cancellation event was set.
     with pytest.raises(Cancelled):
-        engine.download(URL, tmp_path, False, Preferences(playlist_subfolder=False))
+        engine.download(URL, tmp_path, False, mp4_preferences(playlist_subfolder=False))
     assert directories[0] == directories[1]
 
 
@@ -273,11 +280,11 @@ def test_valid_staged_result_recovers_without_redownloading(engine, monkeypatch,
     monkeypatch.setattr(engine, "_run", fake_download)
     monkeypatch.setattr(engine, "_verify_media", Mock(side_effect=Cancelled()))
     with pytest.raises(Cancelled):
-        engine.download(URL, tmp_path, False, Preferences(playlist_subfolder=False))
+        engine.download(URL, tmp_path, False, mp4_preferences(playlist_subfolder=False))
     monkeypatch.setattr(engine, "_verify_media", lambda *args: None)
     run = Mock(side_effect=AssertionError("should reuse staged output"))
     monkeypatch.setattr(engine, "_run", run)
-    assert engine.download(URL, tmp_path, False, Preferences(playlist_subfolder=False))[
+    assert engine.download(URL, tmp_path, False, mp4_preferences(playlist_subfolder=False))[
         "downloaded"
     ]
     run.assert_not_called()
@@ -286,10 +293,12 @@ def test_valid_staged_result_recovers_without_redownloading(engine, monkeypatch,
 def test_invalid_staged_result_is_regenerated(engine, monkeypatch, tmp_path):
     monkeypatch.setattr(engine, "_run", fake_download)
     monkeypatch.setattr(engine, "_verify_media", Mock(side_effect=RuntimeError("truncated")))
-    assert engine.download(URL, tmp_path, False, Preferences(playlist_subfolder=False))["failed"]
+    assert engine.download(URL, tmp_path, False, mp4_preferences(playlist_subfolder=False))[
+        "failed"
+    ]
     verify = Mock(side_effect=[RuntimeError("truncated"), None])
     monkeypatch.setattr(engine, "_verify_media", verify)
-    assert engine.download(URL, tmp_path, False, Preferences(playlist_subfolder=False))[
+    assert engine.download(URL, tmp_path, False, mp4_preferences(playlist_subfolder=False))[
         "downloaded"
     ]
     assert verify.call_count == 2
@@ -300,7 +309,9 @@ def test_existing_user_file_is_never_overwritten(engine, monkeypatch, tmp_path):
     destination.write_bytes(b"user file")
     monkeypatch.setattr(engine, "_run", fake_download)
     monkeypatch.setattr(engine, "_verify_media", lambda *args: None)
-    assert engine.download(URL, tmp_path, False, Preferences(playlist_subfolder=False))["failed"]
+    assert engine.download(URL, tmp_path, False, mp4_preferences(playlist_subfolder=False))[
+        "failed"
+    ]
     assert destination.read_bytes() == b"user file"
     assert not (tmp_path / ".ytsd-archive.txt").exists()
 
@@ -329,7 +340,7 @@ def test_download_uses_the_inspected_tracks_without_reextracting(engine, monkeyp
     )
     monkeypatch.setattr(engine, "_run", run)
     monkeypatch.setattr(engine, "_verify_media", lambda *args: None)
-    assert engine.download(URL, tmp_path, False, Preferences(playlist_subfolder=False))[
+    assert engine.download(URL, tmp_path, False, mp4_preferences(playlist_subfolder=False))[
         "downloaded"
     ]
     assert engine._metadata.call_count == 1
@@ -346,7 +357,7 @@ def test_txt_queue_has_one_ordered_report_and_numbered_outputs(engine, monkeypat
     monkeypatch.setattr(engine, "_metadata", metadata)
     monkeypatch.setattr(engine, "_run", fake_download)
     monkeypatch.setattr(engine, "_verify_media", lambda *args: None)
-    report = engine.download(links, tmp_path, False, Preferences(playlist_subfolder=False))
+    report = engine.download(links, tmp_path, False, mp4_preferences(playlist_subfolder=False))
     assert len(report["downloaded"]) == 2
     assert [item["url"] for item in report["items"]] == links
     assert (tmp_path / "001 - Sample [abcdefghijk].mp4").exists()
@@ -360,7 +371,7 @@ def test_batch_cancellation_keeps_previous_results(engine, monkeypatch, tmp_path
     monkeypatch.setattr(engine, "_verify_media", lambda *args: None)
     engine.progress = lambda *args: engine.cancel()
     with pytest.raises(Cancelled):
-        engine.download([URL, URL], tmp_path, False, Preferences(playlist_subfolder=False))
+        engine.download([URL, URL], tmp_path, False, mp4_preferences(playlist_subfolder=False))
     assert engine.report["state"] == "cancelled"
     assert len(engine.report["downloaded"]) == 1
 
@@ -369,7 +380,7 @@ def test_reports_keep_ids_and_add_readable_metadata(engine, monkeypatch, tmp_pat
     engine._metadata.return_value["formats"][0].update(width=1920, height=1080, fps=30, ext="mp4")
     monkeypatch.setattr(engine, "_run", fake_download)
     monkeypatch.setattr(engine, "_verify_media", lambda *args: None)
-    report = engine.download(URL, tmp_path, False, Preferences(playlist_subfolder=False))
+    report = engine.download(URL, tmp_path, False, mp4_preferences(playlist_subfolder=False))
     item = report["items"][0]
     assert item["video_format"] == "137" and item["audio_format"] == "251-es"
     assert item["video_details"]["description"] == "1920x1080 | 30 fps | H.264"
@@ -396,7 +407,7 @@ def test_subfolder_follows_input_name_for_all_sources(
         [URL] if kind == "txt" else URL,
         tmp_path,
         kind == "playlist",
-        Preferences(playlist_subfolder=enabled),
+        mp4_preferences(playlist_subfolder=enabled),
         batch_name="My links" if kind == "txt" else None,
     )
     destination = tmp_path / name if enabled else tmp_path
@@ -415,13 +426,13 @@ def test_subfolder_names_are_safe_on_windows(engine, monkeypatch, tmp_path):
     engine._metadata.return_value["title"] = "CON"
     monkeypatch.setattr(engine, "_run", fake_download)
     monkeypatch.setattr(engine, "_verify_media", lambda *args: None)
-    report = engine.download(URL, tmp_path, False, Preferences())
+    report = engine.download(URL, tmp_path, False, mp4_preferences())
     assert Path(report["directory"]) == tmp_path / "_CON"
     assert report["downloaded"]
 
 
 def test_skipped_video_still_creates_its_named_folder(engine, tmp_path):
-    report = engine.download(URL, tmp_path, False, Preferences(language="es-ES"))
+    report = engine.download(URL, tmp_path, False, mp4_preferences(language="es-ES"))
     assert (tmp_path / "Sample").is_dir()
     assert report["omitted"]
     assert Path(report["directory"]) == tmp_path / "Sample"

@@ -18,6 +18,8 @@ from .core import (
     describe_format,
     safe_name,
     select_audio,
+    resolve_tracks,
+    TrackPlan,
     select_video,
     valid_youtube_url,
 )
@@ -25,6 +27,9 @@ from .processes import Cancelled as Cancelled
 from .inputs import classify_url
 from .requests import DownloadRequest, TimeRange
 from .processes import ProcessRunner
+from .subtitles import clip_subrip
+from .languages import container_language
+from .tools import ToolManager
 from .storage import (
     DownloadReport,
     archive_video,
@@ -47,6 +52,7 @@ class DownloadEngine:
         self.cancel_event = threading.Event()
         self.runner = ProcessRunner(self.cancel_event)
         self.report: DownloadReport | None = None
+        self.impersonation = "auto"
 
     @staticmethod
     def missing_tools() -> list[str]:
@@ -76,7 +82,14 @@ class DownloadEngine:
                 self.status(line[:500])
 
         return self.runner.run(
-            ["yt-dlp", "--ignore-config", "--encoding", "utf-8", *arguments],
+            [
+                "yt-dlp",
+                "--ignore-config",
+                "--encoding",
+                "utf-8",
+                *(["--impersonate", self.impersonation] if self.impersonation != "auto" else []),
+                *arguments,
+            ],
             capture_all=json_output,
             on_line=None if json_output else on_line,
         )
@@ -113,10 +126,15 @@ class DownloadEngine:
         return "https://www.youtube.com/watch?v=" + vid
 
     def _verify_media(
-        self, path: Path, expected_duration: float | None, *, clip: bool = False
+        self,
+        path: Path,
+        expected_duration: float | None,
+        *,
+        clip: bool = False,
+        plan: TrackPlan | None = None,
     ) -> None:
         if not path.is_file() or not path.stat().st_size:
-            raise RuntimeError("No final MP4 was produced")
+            raise RuntimeError("No final media file was produced")
         output = self.runner.run(
             ["ffprobe", "-v", "error", "-show_format", "-show_streams", "-of", "json", str(path)],
             capture_all=True,
@@ -125,12 +143,45 @@ class DownloadEngine:
         kinds = [stream.get("codec_type") for stream in data.get("streams", [])]
         container = data.get("format", {})
         duration = float(container.get("duration") or 0)
-        if kinds.count("video") != 1 or kinds.count("audio") != 1 or duration <= 0:
+        if (
+            kinds.count("video") != 1
+            or kinds.count("audio") != (len(plan.audios) if plan else 1)
+            or duration <= 0
+        ):
+            expected_audio = len(plan.audios) if plan else 1
             raise RuntimeError(
-                "The final file must contain one video and exactly one valid audio track"
+                f"The final file must contain one video and exactly {expected_audio} valid audio track(s), with positive duration"
             )
-        if "mp4" not in str(container.get("format_name", "")).split(","):
-            raise RuntimeError("The final file is not an MP4 container")
+        expected_container = "matroska" if plan and plan.container == "mkv" else "mp4"
+        if expected_container not in str(container.get("format_name", "")).split(","):
+            raise RuntimeError("The final file has the wrong container")
+        if plan:
+            streams = data.get("streams", [])
+            audio = [x for x in streams if x.get("codec_type") == "audio"]
+            subs = [x for x in streams if x.get("codec_type") == "subtitle"]
+            if len(subs) != len(plan.subtitles):
+                raise RuntimeError("Missing embedded subtitle tracks")
+            for stream, language in zip(
+                audio + subs,
+                [a.detected_language for a in plan.audios]
+                + [x["language"] for x in plan.subtitles],
+            ):
+                tags = stream.get("tags", {})
+                if tags.get("language", "und") != container_language(language):
+                    raise RuntimeError("Incorrect container language tag")
+                if language not in (tags.get("title"), tags.get("handler_name")):
+                    raise RuntimeError("Incorrect track language metadata")
+            if [i for i, x in enumerate(audio) if x.get("disposition", {}).get("default")] != [
+                plan.default_index
+            ]:
+                raise RuntimeError("Incorrect default audio track")
+            # MP4 uses the enabled flag for subtitle availability, not automatic rendering.
+            # FFmpeg enables the first subtitle even when disposition is explicitly zero.
+            if any(x.get("disposition", {}).get("forced") for x in subs) or (
+                plan.container == "mkv"
+                and any(x.get("disposition", {}).get("default") for x in subs)
+            ):
+                raise RuntimeError("Subtitles must be disabled by default")
         if expected_duration and duration < expected_duration - max(2, expected_duration * 0.05):
             raise RuntimeError("The final file appears incomplete (shorter than expected)")
         if (
@@ -175,20 +226,53 @@ class DownloadEngine:
         if archived:
             item.update(status="archived", reason="Already recorded in this folder's archive")
             report["archived"].append(title)
-            self.status(f"Already archived: {title} (audio language is not rechecked)")
+            self.status(f"Already archived: {title} (track selection and format are not rechecked)")
             return
         formats = metadata.get("formats") or []
-        choice = select_audio(formats, prefs.language)
-        fallback = choice.format_id is None and prefs.missing == "fallback"
-        if fallback:
-            choice = select_audio(formats, "original")
+        plan = resolve_tracks(metadata, prefs)
+        # Retain resumable work paths for callers of the original single-language API.
+        # The UI always supplies explicit audio lists.
+        explicit_tracks = (
+            prefs.audio_languages is not None
+            or bool(prefs.subtitle_languages)
+            or prefs.container != "mp4"
+        )
+        choice = plan.audios[0] if plan.audios else select_audio([], prefs.language)
+        fallback = plan.fallback
+        original = select_audio(formats, "original")
         item.update(
-            requested_language=prefs.language,
+            requested_language=prefs.requested_audio[0],
+            requested_audio=list(prefs.requested_audio),
+            requested_subtitles=list(prefs.subtitle_languages),
+            missing_audio=list(plan.missing_audio),
+            missing_subtitles=list(plan.missing_subtitles),
+            included_audio=[
+                dict(
+                    format_id=a.format_id,
+                    language=a.detected_language,
+                    reason=a.reason,
+                    verified=a.verified,
+                )
+                for a in plan.audios
+            ],
+            included_subtitles=[{k: x[k] for k in ("language", "source")} for x in plan.subtitles],
+            default_audio_index=plan.default_index,
+            original_audio={"language": original.detected_language, "verified": original.verified},
+            container=plan.container,
             audio_language=choice.detected_language,
             verified=choice.verified and not fallback,
             fallback=fallback,
             reason=choice.reason,
         )
+        self.status(
+            f"Original/default audio: {original.detected_language} ({'verified' if original.verified else 'unverified extractor preference'})"
+        )
+        for label, missing in (
+            ("audio", plan.missing_audio),
+            ("subtitles", plan.missing_subtitles),
+        ):
+            if missing:
+                self.status(f"WARNING: {title}: unavailable {label}: {', '.join(missing)}")
         video_format = select_video(formats, prefs.quality)
         if not choice.format_id or not video_format:
             reason = (
@@ -207,11 +291,37 @@ class DownloadEngine:
         item.update(
             video_details=describe_format(selected_video, audio=False),
             audio_details=describe_format(selected_audio, audio=True),
+            audio_tracks=[
+                describe_format(
+                    next(f for f in formats if f.get("format_id") == a.format_id), audio=True
+                )
+                for a in plan.audios
+            ],
         )
         identity = {
             key: selected_audio.get(key)
             for key in ("format_id", "language", "format_note", "acodec", "asr", "audio_channels")
         }
+        if explicit_tracks:
+            identity = {
+                "audios": [
+                    {
+                        key: next(f for f in formats if f.get("format_id") == a.format_id).get(key)
+                        for key in (
+                            "format_id",
+                            "language",
+                            "format_note",
+                            "acodec",
+                            "asr",
+                            "audio_channels",
+                        )
+                    }
+                    for a in plan.audios
+                ],
+                "subtitles": [(x["language"], x["source"]) for x in plan.subtitles],
+                "container": plan.container,
+                "default": plan.default_index,
+            }
         profile = hashlib.sha256(
             json.dumps(
                 [video_format, identity, time_range.key]
@@ -222,18 +332,29 @@ class DownloadEngine:
         ).hexdigest()[:12]
         workdir = directory / ".ytsd-work" / f"{video_id}-{profile}"
         workdir.mkdir(parents=True, exist_ok=True)
-        staged = workdir / f"{video_id}.mp4"
+        staged = workdir / (
+            f"{video_id}.final.{plan.container}" if explicit_tracks else f"{video_id}.mp4"
+        )
+        verification: dict[str, Any] = {"plan": plan} if explicit_tracks else {}
+        if time_range:
+            verification["clip"] = True
         ready = False
         if staged.exists():
             try:
-                self._verify_media(staged, duration, **({"clip": True} if time_range else {}))
+                self._verify_media(staged, duration, **verification)
                 ready = True
             except Cancelled:
                 raise
             except (RuntimeError, ValueError):
                 # Only remove the invalid generated output in our private workdir.
                 staged.unlink()
-        self.status(f"Downloading: {title} — audio {choice.detected_language} ({choice.reason})")
+        self.status(
+            f"Downloading: {title} | audio {', '.join(a.detected_language for a in plan.audios)}; {plan.container.upper()}"
+        )
+        for subtitle in plan.subtitles:
+            self.status(
+                f"Subtitles: {subtitle['language']} ({'automatic' if subtitle['source'] == 'automatic_captions' else 'published'})"
+            )
         if not ready:
             # Download exactly the metadata whose language we inspected, without a second
             # extraction that could assign different suffixes to multilingual format IDs.
@@ -250,28 +371,32 @@ class DownloadEngine:
                 }
             }
             snapshot["formats"] = [
-                f for f in formats if f.get("format_id") in {video_format, choice.format_id}
+                f
+                for f in formats
+                if f.get("format_id") in {video_format, *(a.format_id for a in plan.audios)}
             ]
             info_file = workdir / "source.info.json"
             atomic_text(info_file, json.dumps(snapshot, ensure_ascii=False))
-            self._run(
-                download_args(
-                    video_url,
-                    workdir,
-                    video_format,
-                    choice.format_id,
-                    prefs.quality,
-                    index,
-                    info_file=info_file,
-                    time_range=time_range,
-                ),
-                current=number,
-                total=total,
+            args = download_args(
+                video_url,
+                workdir,
+                video_format,
+                choice.format_id,
+                prefs.quality,
+                index,
+                info_file=info_file,
+                time_range=time_range,
+                audio_ids=tuple(str(a.format_id) for a in plan.audios),
+                container="mkv" if explicit_tracks else "mp4",
+                copy_streams=explicit_tracks,
             )
-        self._verify_media(staged, duration, **({"clip": True} if time_range else {}))
+            self._run(args, current=number, total=total)
+            if explicit_tracks:
+                self._assemble(snapshot, workdir, video_id, staged, plan, time_range, duration)
+        self._verify_media(staged, duration, **verification)
         self.runner.check_cancelled()
         prefix = f"{index:03d} - " if index is not None else ""
-        destination = directory / f"{prefix}{safe_name(title)} [{video_id}].mp4"
+        destination = directory / f"{prefix}{safe_name(title)} [{video_id}].{plan.container}"
         if destination.exists():
             raise FileExistsError(
                 f"{destination.name} already exists; review or move it before retrying"
@@ -287,11 +412,135 @@ class DownloadEngine:
             archive_clip(directory, video_id, time_range)
         else:
             archive_video(directory, video_id)
-        report["downloaded"].append(f"{title}: {choice.detected_language} ({choice.reason})")
+        report["downloaded"].append(
+            f"{title}: {', '.join(a.detected_language for a in plan.audios)} ({plan.container.upper()})"
+        )
         try:
             shutil.rmtree(workdir)
         except OSError as exc:
             self.status(f"Download complete; could not clean temporary files: {exc}")
+
+    def _assemble(
+        self,
+        metadata: dict[str, Any],
+        workdir: Path,
+        video_id: str,
+        staged: Path,
+        plan: TrackPlan,
+        time_range: TimeRange | None,
+        duration: float | None,
+    ) -> None:
+        subtitle_files = []
+        for index, subtitle in enumerate(plan.subtitles):
+            snapshot = dict(metadata)
+            snapshot["subtitles"] = {subtitle["language"]: subtitle["formats"]}
+            snapshot["automatic_captions"] = {}
+            info = workdir / f"subtitle-{index}.info.json"
+            atomic_text(info, json.dumps(snapshot, ensure_ascii=False))
+            self._run(
+                [
+                    "--load-info-json",
+                    str(info),
+                    "--skip-download",
+                    "--write-subs",
+                    "--sub-langs",
+                    subtitle["language"],
+                    "--sub-format",
+                    "srt/vtt/ttml/best",
+                    "--convert-subs",
+                    "srt",
+                    "-P",
+                    str(workdir),
+                    "-o",
+                    f"subtitle-{index}.%(ext)s",
+                ]
+            )
+            path = workdir / f"subtitle-{index}.{subtitle['language']}.srt"
+            if not path.is_file():
+                raise RuntimeError(f"Subtitle download failed: {subtitle['language']}")
+            if time_range:
+                clipped = workdir / f"subtitle-{index}.clip.srt"
+                atomic_text(
+                    clipped,
+                    clip_subrip(
+                        path.read_text(encoding="utf-8-sig"),
+                        time_range.start,
+                        time_range.start + duration if duration else None,
+                    ),
+                )
+                path = clipped
+            subtitle_files.append(path)
+        command = [
+            "ffmpeg",
+            "-nostdin",
+            "-y",
+            "-v",
+            "error",
+            "-i",
+            str(workdir / f"{video_id}.mkv"),
+        ]
+        for path in subtitle_files:
+            command += ["-f", "srt", "-i", str(path)]
+        command += ["-map", "0:v:0"]
+        for index in range(len(plan.audios)):
+            command += ["-map", f"0:a:{index}"]
+        for index in range(len(subtitle_files)):
+            command += ["-map", f"{index + 1}:s:0"]
+        command += ["-c", "copy", "-map_metadata", "-1"]
+        if plan.container == "mp4":
+            formats = metadata.get("formats") or []
+            video = next(
+                f
+                for f in formats
+                if f.get("vcodec") not in {None, "none"} and f.get("acodec") == "none"
+            )
+            if str(video.get("vcodec", "")).split(".")[0] not in {
+                "avc1",
+                "h264",
+                "av01",
+                "av1",
+                "hvc1",
+                "hev1",
+                "hevc",
+                "vp09",
+                "vp9",
+            }:
+                command += ["-c:v", "libx264", "-crf", "18", "-preset", "medium"]
+            for index, choice in enumerate(plan.audios):
+                audio = next(f for f in formats if f.get("format_id") == choice.format_id)
+                if str(audio.get("acodec", "")).split(".")[0] not in {
+                    "mp4a",
+                    "aac",
+                    "opus",
+                    "mp3",
+                    "ac3",
+                    "eac3",
+                    "alac",
+                }:
+                    command += [f"-c:a:{index}", "aac", f"-b:a:{index}", "192k"]
+        if subtitle_files:
+            command += ["-c:s", "srt" if plan.container == "mkv" else "mov_text"]
+        for kind, languages in (
+            ("a", [a.detected_language for a in plan.audios]),
+            ("s", [x["language"] for x in plan.subtitles]),
+        ):
+            for index, language in enumerate(languages):
+                # Preserve the full regional tag in title; ISO 639-2 in language for players.
+                iso = container_language(language)
+                command += [
+                    f"-metadata:s:{kind}:{index}",
+                    f"language={iso}",
+                    f"-metadata:s:{kind}:{index}",
+                    f"title={language}",
+                    f"-metadata:s:{kind}:{index}",
+                    f"handler_name={language}",
+                    f"-disposition:{kind}:{index}",
+                    "default" if kind == "a" and index == plan.default_index else "0",
+                ]
+        if time_range and duration:
+            command += ["-t", str(duration)]
+        command += [str(staged)]
+        self.runner.run(command)
 
     def download(
         self,
@@ -303,6 +552,7 @@ class DownloadEngine:
         batch_name: str | None = None,
     ) -> DownloadReport:
         prefs.validate()
+        self.impersonation = prefs.impersonation
         single_range = None
         if isinstance(url, DownloadRequest):
             single_range = url.time_range
@@ -323,7 +573,8 @@ class DownloadEngine:
         directory.mkdir(parents=True, exist_ok=True)
         session = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
         report: DownloadReport = {
-            "schema_version": 2,
+            "schema_version": 3,
+            "impersonation": prefs.impersonation,
             "downloaded": [],
             "archived": [],
             "omitted": [],
@@ -341,6 +592,12 @@ class DownloadEngine:
             missing = self.missing_tools()
             if missing:
                 raise RuntimeError("Missing tools: " + ", ".join(missing))
+            if prefs.impersonation != "auto":
+                targets = ToolManager(self.cancel_event).impersonation_targets()
+                if prefs.impersonation not in targets:
+                    raise ValueError(
+                        "Impersonation profile unavailable. Choose Automatic or update yt-dlp."
+                    )
             videos: list[tuple[Any, int | None]]
             if isinstance(url, list):
                 directory = self._source_directory(

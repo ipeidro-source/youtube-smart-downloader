@@ -12,7 +12,11 @@ Cancelling installation stops the tracked process tree when Windows permits it. 
 
 Language labels are metadata, not recognition of the spoken language. Incorrect upstream labels cannot be detected reliably. Regional Spanish requires an explicit tag. Fallback tracks are unverified for the requested language. Original-track detection is limited to explicit extractor markers.
 
+Multiple requested languages may not all be available. Missing tracks are reported; failures downloading an available selected track fail the video. Subtitles are embedded, and their availability and automatic-caption quality depend on YouTube. MKV subtitles are non-default; MP4 enables the first subtitle for player selection even when its default disposition is cleared. Player preferences can still enable subtitles automatically. Compatible streams are copied; MP4 may require H.264/AAC conversion for unsupported codecs.
+
 Combined-only video/audio formats and active live streams are not downloaded. ffprobe checks structure, stream counts and duration; it cannot prove every frame is decodable or that the voice matches the selected language. Unknown format details are shown as unknown instead of inferred from technical IDs.
+
+Automatic impersonation leaves the decision to yt-dlp. Forced browser families require support in the installed yt-dlp; unavailable choices fail before extraction. Profiles are detected locally and are not personal browser profiles. Forcing a profile may reduce speed or stability and does not bypass account requirements.
 
 ## Inputs and resumption
 
@@ -20,7 +24,7 @@ Video/playlist links are ambiguous when both identifiers are present; users choo
 
 Older partial files are not migrated into `.ytsd-work`. Resumption requires the same destination and compatible track identifiers/metadata. When automatic subfolders are enabled, changes to the video title, playlist title or TXT filename change the destination. Choose the previous folder and disable subfolders to reuse files already there. Expired media URLs require a retry with fresh metadata.
 
-The archive records one entry per provider/video ID, not per language or quality. It does not verify that an old file is still present or complete. Use separate destinations for different variants. Avoid concurrent application instances writing to one destination: output files are protected against overwrite, but the archive does not implement an interprocess lock.
+The archive records one entry per provider/video ID, not per audio/subtitle selection, container or quality. It does not verify that an old file is still present or complete. Use separate destinations for different variants. Avoid concurrent application instances writing to one destination: output files are protected against overwrite, but the archive does not implement an interprocess lock.
 
 Reports are incremental and session-specific. Insufficient disk space or permissions can prevent persistence; the UI reports these errors. Existing reports and preferences remain local and are not rewritten merely to translate them.
 

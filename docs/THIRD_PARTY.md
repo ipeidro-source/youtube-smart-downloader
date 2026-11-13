@@ -7,7 +7,7 @@ The application source and original project assets are MIT licensed, copyright (
 | Component | License / notices | Role |
 | --- | --- | --- |
 | Python and standard library | PSF license and included third-party terms | Embedded interpreter; its complete Windows `LICENSE.txt` is copied from the build installation |
-| Tcl/Tk | Tcl/Tk permissive license | Tkinter runtime; installed Tk terms and the upstream Tcl terms are included |
+| Tcl/Tk | Tcl/Tk permissive license | Tkinter runtime, native list controls and language popup windows; installed Tk terms and the upstream Tcl terms are included |
 | CustomTkinter | MIT | UI and shapes font; its installed `LICENSE` is authoritative despite the inconsistent `License` field in version 5.2.2's package metadata |
 | Roboto Regular and Medium | Apache-2.0; copyright 2011 Google Inc. All Rights Reserved. | Fonts included by CustomTkinter; license also identified in the fonts' name tables |
 | darkdetect | BSD-3-Clause | Theme detection |

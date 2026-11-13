@@ -1,6 +1,6 @@
 # YouTube Smart Downloader
 
-A free, open-source Windows desktop application built with CustomTkinter and yt-dlp, with explicit audio-language selection.
+A free, open-source Windows desktop application built with CustomTkinter and yt-dlp, with selectable audio tracks and embedded subtitles.
 
 Only download content when you have the necessary rights or permission.
 
@@ -10,11 +10,14 @@ Only download content when you have the necessary rights or permission.
 - Import a UTF-8 TXT file with one video URL per line, preserving the order.
 - Download optional time ranges for individual videos or per TXT entry, using fast cuts.
 - Choose a destination folder and optionally create a subfolder named after the video, playlist or imported TXT file (without its extension).
-- Select Spanish (any region), Spanish (Spain), Spanish (Latin America), English, original or automatic audio.
-- Strict language matching: skip videos without a matching labelled track, or explicitly allow an unverified fallback.
+- Select and reorder audio languages by name from searchable dropdowns, including regional variants; choose the playback default.
+- Embed selected subtitle languages, preferring published subtitles and optionally allowing automatic captions.
+- Include available languages and report missing ones. If no requested audio exists, skip the video or explicitly allow an unverified fallback.
 - Choose the maximum resolution: best available, 1080p, 720p or 480p.
-- MP4 output, progress, cancellation, resumable partial files and a per-folder archive.
+- Choose MKV (default) or MP4 with any number of audio and subtitle tracks. Subtitles stay inside the media file.
+- Progress, cancellation, resumable partial files and a per-folder archive.
 - Incremental JSON reports with readable format descriptions and technical IDs.
+- Automatic or forced browser impersonation using the profiles available in yt-dlp.
 - Startup tool checks and optional installation/updates using winget.
 
 ## Windows usage
@@ -23,7 +26,7 @@ Only download content when you have the necessary rights or permission.
 2. Run the executable. Windows SmartScreen may ask you to verify its origin.
 3. Startup checks yt-dlp, FFmpeg, ffprobe and Deno. If a tool is missing or unusable, install the listed dependencies or exit. FFmpeg includes ffprobe.
 4. Working tools let you continue even when updates are available or update information cannot be obtained. The **Update tools** button appears only for confirmed updates.
-5. Paste a YouTube link or select **Import links...**, choose the destination, language and quality, then select **Download**.
+5. Paste a YouTube link or select **Import links...**, choose the destination, audio/subtitle languages, playback default, format and quality, then select **Download**.
 6. Use **About** to view the application version, author, technologies, project/support links and privacy policy. The **Licenses** tab displays the release's bundled license notices locally.
 
 Python is not required for the executable. yt-dlp, FFmpeg/ffprobe and Deno are external tools; they are not bundled. Windows with winget and an internet connection is required for automatic installation. Manual installation is also supported. Restart the app after installation or updates if PATH has changed.
@@ -34,7 +37,7 @@ Author and copyright holder: **ipeidro** ([@ipeidro-source](https://github.com/i
 
 ## Input files
 
-TXT files use UTF-8 (a BOM is accepted), one YouTube video URL per line. Blank lines and lines beginning with `#`, `;` or `]` are ignored. Playlists and ambiguous video/playlist links are rejected inside TXT files. Invalid lines and duplicate videos are listed before importing; no URLs are silently discarded. Imported videos use one ordered queue, one destination and one session report. When **Create a subfolder** is checked, all imported videos share a folder named after the TXT file without its extension. Importing a file does not add support for other video providers.
+TXT files use UTF-8 (a BOM is accepted), one YouTube video URL per line. Blank lines and lines beginning with `#`, `;` or `]` are ignored. Playlists and ambiguous video/playlist links are rejected inside TXT files. Invalid lines and duplicate videos are listed before importing; no URLs are silently discarded. Imported videos use one ordered queue, one destination and one session report. When **Create a subfolder for the source** is checked, all imported videos share a folder named after the TXT file without its extension. Importing a file does not add support for other video providers.
 
 For a single video, optional **Start** and **End** fields select a time range. Enter whole seconds,
 `MM:SS` or `HH:MM:SS` (for example `90`, `01:30` or `01:02:30`); minutes and seconds in
@@ -59,7 +62,7 @@ unknown duration, fail individually without stopping the remaining queue.
 
 Cuts use yt-dlp's `--download-sections` and FFmpeg without forcing keyframes or additional
 recoding for the cut. **Fast cuts may differ from the requested times due to keyframes.**
-The existing MP4 conversion may still recode incompatible formats. Playlists always download
+MP4 output may still require conversion of incompatible codecs. Playlists always download
 whole videos; range fields are disabled for playlists and TXT imports (TXT ranges come from
 the file). If an ambiguous link is resolved as a playlist, clear any entered times before starting.
 
@@ -93,14 +96,19 @@ The build embeds and copies license, privacy and uninstallation documents. It co
 
 The blue/cyan video-and-audio icon is shared by the window and executable. Its source and export instructions are in [assets/README.md](assets/README.md).
 
-Close the executable before rebuilding it. To leave an existing instance running, build and test a separate copy:
+Close the executable before rebuilding it. Keep the current local executable at `dist/YouTubeSmartDownloader.exe`; avoid accumulating preview copies. Build intermediates are generated under `build/` and can be removed after validation. The build and packaging commands create local artifacts only; they do not publish a release.
 
-```powershell
-python scripts/build_windows.py --dist-dir dist/preview
-python scripts/smoke_windows.py --executable dist/preview/YouTubeSmartDownloader.exe
-```
+The integration tests in `tests/test_local_media.py` require yt-dlp, FFmpeg and ffprobe on PATH. They serve synthetic media on `127.0.0.1`, check the decoded audio and test HTTP range resumption without contacting YouTube. They are skipped if the tools are unavailable. `tests/test_language_picker.py` additionally checks repeated keyboard searches and popup dismissal on a Windows desktop; it is skipped on Linux.
 
-The integration tests in `tests/test_local_media.py` require yt-dlp, FFmpeg and ffprobe on PATH. They serve synthetic media on `127.0.0.1`, check the decoded audio and test HTTP range resumption without contacting YouTube. They are skipped if the tools are unavailable.
+## Audio and subtitle selection
+
+Configure requested languages before downloading. The same preferences apply to every video in a playlist or TXT batch; they do not claim that those languages exist. Choose languages by name and code from searchable dropdowns with mouse-wheel scrolling, then add/remove and reorder them in the two compact lists. Mark the preferred playback audio with **Set default**; an asterisk identifies it. New preferences start with Spanish (Spain) as the default audio and English (any region) second, plus Spanish and English subtitles. Explicit saved selections are preserved; the legacy Spanish-only setup adopts these initial language lists. If that audio is absent, the first available requested audio becomes the default. Requests resolving to the same audio track are deduplicated. The log and report identify YouTube's original/default audio separately, with its verification status.
+
+Missing languages produce warnings rather than discarding the available tracks. The skip/fallback choice applies only when none of the requested audios is available. MKV is the default; MP4 is also available with one or multiple audios and subtitles. The chosen container is respected regardless of the number of available tracks. Compatible video/audio streams are copied; unsupported MP4 codecs are converted to H.264/AAC as needed.
+
+Subtitles are optional and embedded as selectable SubRip (MKV) or `mov_text` (MP4) tracks. No external subtitle files are published. Published subtitles take precedence; **Allow automatic subtitles** permits extractor-provided automatic captions or translations when published subtitles in that language are unavailable. Live chat is excluded. For clips, cues are clipped to the interval and their timestamps start at the beginning of the fragment. A failure to download or embed a selected available track fails that video and retains its temporary work.
+
+Subtitles are not marked forced. MKV subtitle tracks are explicitly non-default. MP4's FFmpeg muxer enables its first subtitle track so players can list it, even with a zero default disposition; automatic display ultimately depends on the player and its language preferences.
 
 ## Audio-language guarantees
 
@@ -108,16 +116,25 @@ Language verification refers to extractor metadata, not speech recognition. `es-
 
 Only independent video and audio streams are used. Combined-only formats are skipped to avoid changing the selected audio silently. The download uses a snapshot of the inspected metadata and exactly the chosen tracks. If signed media URLs expire, retry to obtain new metadata. Active live streams are not supported.
 
+`Spanish (Spain)` is strict: it does not fall back to Latin American Spanish. `Spanish (any region)` selects one matching Spanish track by reported bitrate, without prioritizing Spain. Adding both requests independent tracks; list order does not define a regional fallback chain.
+
 ## Files and resumption
 
-- `.ytsd-archive.txt` records provider and video ID in yt-dlp-compatible format. The application updates it atomically after validating and publishing the MP4. Only YouTube is supported. An archived ID represents a video, not an audio/quality variant; use a separate destination for another variant. Existing archive entries are respected without certifying old files or their language.
-- `.ytsd-clips.txt` separately records video IDs and normalized ranges after successful validation and publication. Whole-video entries do not skip clips, and clips do not skip whole videos. Clip filenames and temporary-work identities include their range; the report records requested start/end seconds. Clip archive entries also do not distinguish audio/quality variants. Cuts are verified against the requested clip duration with a tolerance of the greater of two seconds or 5%.
-- **Create a subfolder** applies to every input: the video title, playlist title or TXT filename without its extension determines the folder name. Names are sanitized for Windows. When unchecked, all files go directly into the selected destination. Playlist and TXT entries do not get additional per-video subfolders.
+- `.ytsd-archive.txt` records provider and video ID in yt-dlp-compatible format. The application updates it atomically after validating and publishing the media file. Only YouTube is supported. An archived ID represents a video, not an audio/subtitle, format or quality variant; use a separate destination for another variant. Existing archive entries are respected without certifying old files or their language.
+- `.ytsd-clips.txt` separately records video IDs and normalized ranges after successful validation and publication. Whole-video entries do not skip clips, and clips do not skip whole videos. Clip filenames and temporary-work identities include their range; the report records requested start/end seconds. Clip archive entries also do not distinguish track, format or quality variants. Cuts are verified against the requested clip duration with a tolerance of the greater of two seconds or 5%.
+- **Create a subfolder for the source** applies to every input: the video title, playlist title or TXT filename without its extension determines the folder name. Names are sanitized for Windows. When unchecked, all files go directly into the selected destination. Playlist and TXT entries do not get additional per-video subfolders.
 - `.ytsd-work` holds partial files and metadata snapshots, identified by video and selected tracks. Retry with the same destination and track selection. Queue-index changes do not move the partial files. When subfolders are enabled, a changed video/playlist title or TXT filename changes the destination; select the previous folder and disable automatic subfolders to reuse its partials. Partial files from older versions that did not create video/TXT subfolders remain in their original location.
 - Metadata snapshots contain media URLs and are deleted with the work directory after success. Interrupted jobs keep them locally.
-- ffprobe checks the container, one video stream, exactly one audio stream and duration before publication. Existing destination files are never overwritten. Invalid staged MP4 files are regenerated. This check does not replace full decoding or listening to the audio.
+- ffprobe checks the container, one video stream, the selected audio/subtitle stream counts, language tags, default audio and duration before publication. Existing destination files are never overwritten. Invalid staged media files are regenerated. This check does not replace full decoding or listening to the audio.
+- Reports use schema version 3 and include requested/included/missing audio and subtitle languages, manual/automatic subtitle provenance, the default audio index, effective container and session impersonation preference. Existing single-audio diagnostic fields are retained.
 - Each session keeps a JSON report in `.ytsd-reports`; `download-report.json` is the latest session. Reports distinguish new downloads, archived videos, skips, failures and cancellation. Older `informe-descarga.json` reports are left untouched.
-- Technical `video_format` and `audio_format` IDs remain available for diagnostics; additional details describe codecs, resolution, FPS, language, bitrate and channels where metadata provides them.
+- Technical `video_format` and `audio_format` IDs remain available for diagnostics; additional details describe the source codecs, resolution, FPS, language, bitrate and channels where metadata provides them. MP4 conversion can change the output codecs.
+
+The track list order is preserved in the file. Subtitle tracks are optional; at least one audio language must remain selected.
+
+## Browser impersonation
+
+The **Impersonation** selector sits beside quality, format and missing-audio behavior. **Automatic** (default) leaves networking decisions to yt-dlp. Available browser families are detected from the installed yt-dlp without a network request; selecting Chrome, Edge, Firefox or another listed browser forces that family for metadata, media and subtitles. Versions and operating systems are selected by yt-dlp from its installed profiles. This does not use browser accounts, cookies or personal profiles. Saved choices persist; a forced profile that is no longer available stops with a clear error instead of silently changing behavior. Builds without impersonation support can still use Automatic. Forcing impersonation can affect speed/stability.
 
 ## Tool checks and updates
 
@@ -132,14 +149,21 @@ A push to `main`, including a merge, validates the integrated code and generates
 
 ## Architecture
 
-- `core.py`: pure language, quality and download argument policies.
+- `core.py`: preferences, track resolution, quality and download argument policies.
+- `languages.py`: language names for the pickers and container language tags.
+- `language_picker.py`: bounded language popups with keyboard search and mouse-wheel scrolling.
+- `subtitles.py`: subtitle cue clipping and timestamp adjustment.
 - `inputs.py`: input classification and TXT validation.
 - `engine.py`: queue planning, metadata and download orchestration.
 - `processes.py`: cancellable subprocess execution.
 - `tools.py`: local dependency checks, winget update discovery and maintenance.
 - `storage.py`: atomic reports, archive and output publication.
 - `app.py`: English CustomTkinter UI and worker/event coordination.
-- `settings.py`: local preferences under `%APPDATA%/YouTubeSmartDownloader`.
+- `settings.py`: preference validation and migration under `%APPDATA%/YouTubeSmartDownloader`.
+- `requests.py`: video requests and validated whole-second time ranges.
+- `about.py` and `release_metadata.py`: application identity, notices and build metadata.
+
+Compatibility code retains the legacy single-language API and `playlist_subfolder` setting so older preferences and MP4 work files can still be used. The removed video/playlist `mode` setting is discarded; input type is inferred from the URL.
 
 See [LIMITATIONS.md](docs/LIMITATIONS.md) for remaining limits and privacy details.
 

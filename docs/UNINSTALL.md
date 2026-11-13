@@ -5,7 +5,7 @@
 1. Cancel active work and close YouTube Smart Downloader. Wait for any tool installation or update to finish.
 2. Delete `YouTubeSmartDownloader.exe` and any extracted release documents or shortcuts you created. There is no application installer, Windows service, scheduled task or autorun entry to remove.
 3. To remove preferences and the update cache, open `%APPDATA%` in File Explorer and delete only the `YouTubeSmartDownloader` folder. Keep it if you want to preserve preferences for a later version.
-4. Downloaded videos are not deleted automatically. In your chosen download destination, you may separately remove `.ytsd-work`, `.ytsd-reports`, `.ytsd-archive.txt` and `download-report.json` if you no longer need them. Partial downloads cannot resume after deleting their work files. Removing the archive allows videos to be downloaded again. Preserve any media or reports you want to keep.
+4. Downloaded videos are not deleted automatically. In your chosen download destination, you may separately remove `.ytsd-work`, `.ytsd-reports`, `.ytsd-archive.txt`, `.ytsd-clips.txt` and `download-report.json` if you no longer need them. Partial downloads cannot resume after deleting their work files. Removing the corresponding whole-video or clip archive allows those downloads again. These files may also be inside automatically created source subfolders. Preserve any media or reports you want to keep.
 
 ## External tools
 

@@ -6,12 +6,13 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, TypedDict, NotRequired
 from .requests import TimeRange
 
 
 class DownloadReport(TypedDict):
     schema_version: int
+    impersonation: NotRequired[str]
     downloaded: list[str]
     archived: list[str]
     omitted: list[str]

@@ -86,8 +86,31 @@ class Preferences:
     quality: str = "best"
     playlist_subfolder: bool = True  # Legacy settings key; applies to every input type.
 
+    audio_languages: tuple[str, ...] | None = None
+    subtitle_languages: tuple[str, ...] = ()
+    default_audio: str | None = None
+    automatic_subtitles: bool = False
+    container: str = "mkv"
+    impersonation: str = "auto"
+
+    @property
+    def requested_audio(self) -> tuple[str, ...]:
+        return self.audio_languages if self.audio_languages is not None else (self.language,)
+
     def validate(self) -> None:
-        if self.language not in LANGUAGES:
+        if not valid_impersonation(self.impersonation):
+            raise ValueError("Invalid impersonation profile")
+        if not self.requested_audio or any(
+            not valid_language(x, audio=True) for x in self.requested_audio
+        ):
+            raise ValueError("Choose at least one valid audio language")
+        if any(not valid_language(x) for x in self.subtitle_languages):
+            raise ValueError("Invalid subtitle language")
+        if self.default_audio and self.default_audio not in self.requested_audio:
+            raise ValueError("Default audio must be among requested languages")
+        if self.container not in {"mp4", "mkv"}:
+            raise ValueError("Unknown container")
+        if self.audio_languages is None and self.language not in LANGUAGES:
             raise ValueError("Unknown audio language")
         if self.missing not in {"skip", "fallback"}:
             raise ValueError("Unknown missing-language policy")
@@ -245,11 +268,19 @@ def download_args(
     *,
     info_file: Path | None = None,
     time_range: TimeRange | None = None,
+    audio_ids: tuple[str, ...] | None = None,
+    container: str = "mkv",
+    copy_streams: bool = False,
 ) -> list[str]:
     """Explicit formats prevent accidentally choosing a different language."""
     if not video_id or not audio_id:
         raise ValueError("Independent video and audio tracks are required")
-    fmt = f"{video_id}+{audio_id}"
+    selected_audio = audio_ids if audio_ids is not None else (audio_id,)
+    if not selected_audio or any(not track for track in selected_audio):
+        raise ValueError("At least one audio track is required")
+    if container not in {"mp4", "mkv"}:
+        raise ValueError("Unknown container")
+    fmt = "+".join((video_id, *selected_audio))
     if quality not in QUALITY:
         raise ValueError("Unknown quality")
     return [
@@ -267,11 +298,97 @@ def download_args(
         "%(id)s.%(ext)s",
         "-f",
         fmt,
+        *(["--audio-multistreams"] if len(selected_audio) > 1 else []),
         "--merge-output-format",
-        "mp4",
-        "--recode-video",
-        "mp4",
+        container,
+        *([] if copy_streams else ["--recode-video", container]),
         "--progress-template",
         "download:YTSD_PROGRESS:%(progress._percent_str)s",
         *(["--load-info-json", str(info_file)] if info_file is not None else [url]),
     ]
+
+
+def valid_language(value: object, *, audio: bool = False) -> bool:
+    return isinstance(value, str) and (
+        (audio and value in {"original", "auto"})
+        or (
+            value not in {"original", "auto", "live_chat"}
+            and re.fullmatch(r"[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*", value) is not None
+        )
+    )
+
+
+@dataclass(frozen=True)
+class TrackPlan:
+    audios: tuple[AudioChoice, ...]
+    subtitles: tuple[dict[str, Any], ...]
+    missing_audio: tuple[str, ...]
+    missing_subtitles: tuple[str, ...]
+    default_index: int
+    container: str
+    fallback: bool
+
+
+def resolve_tracks(metadata: dict[str, Any], prefs: Preferences) -> TrackPlan:
+    audios: list[AudioChoice] = []
+    indices: dict[str, int] = {}
+    missing: list[str] = []
+    for language in prefs.requested_audio:
+        choice = select_audio(metadata.get("formats") or [], language)
+        if not choice.format_id:
+            missing.append(language)
+            continue
+        existing = next((i for i, a in enumerate(audios) if a.format_id == choice.format_id), None)
+        indices[language] = len(audios) if existing is None else existing
+        if existing is None:
+            audios.append(choice)
+    fallback = not audios and prefs.missing == "fallback"
+    if fallback:
+        choice = select_audio(metadata.get("formats") or [], "original")
+        if choice.format_id:
+            audios.append(choice)
+    subtitles: list[dict[str, Any]] = []
+    absent: list[str] = []
+    for requested in prefs.subtitle_languages:
+        selected = None
+        for source in (
+            ("subtitles", "automatic_captions") if prefs.automatic_subtitles else ("subtitles",)
+        ):
+            candidates = metadata.get(source) or {}
+            keys = sorted(
+                k for k in candidates if valid_language(k) and language_matches(k, requested)
+            )
+            keys.sort(key=lambda k: normalize_language(k) != normalize_language(requested))
+            for key in keys:
+                formats = [
+                    f
+                    for f in candidates[key]
+                    if f.get("url") and f.get("ext") in {"srt", "vtt", "ttml", "srv3", "json3"}
+                ]
+                if formats:
+                    selected = {"language": key, "source": source, "formats": formats}
+                    break
+            if selected:
+                break
+        if selected:
+            if not any(s["language"] == selected["language"] for s in subtitles):
+                subtitles.append(selected)
+        else:
+            absent.append(requested)
+    return TrackPlan(
+        tuple(audios),
+        tuple(subtitles),
+        tuple(missing),
+        tuple(absent),
+        indices.get(prefs.default_audio or prefs.requested_audio[0], 0),
+        prefs.container,
+        fallback,
+    )
+
+
+def valid_impersonation(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) <= 80
+        and (value == "auto" or re.fullmatch(r"[a-z][a-z0-9-]*(?::[a-z0-9-]+)?", value) is not None)
+    )
