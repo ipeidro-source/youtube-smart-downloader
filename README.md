@@ -1,6 +1,8 @@
 # YouTube Smart Downloader
 
-<img src="src/youtube_smart_downloader/assets/app-icon.png" alt="YouTube Smart Downloader app icon" width="112" align="right">
+<p align="center">
+  <img src="img/social-preview-github.jpg" alt="YouTube Smart Downloader — Windows app for video, multi-language audio tracks and embedded subtitles" width="100%">
+</p>
 
 **Download YouTube videos and playlists with the audio tracks and subtitles you choose.**
 
