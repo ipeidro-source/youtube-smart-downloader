@@ -1,39 +1,49 @@
 # YouTube Smart Downloader
 
-A free, open-source Windows desktop application built with CustomTkinter and yt-dlp, with selectable audio tracks and embedded subtitles.
+<img src="src/youtube_smart_downloader/assets/app-icon.png" alt="YouTube Smart Downloader app icon" width="112" align="right">
 
-Only download content when you have the necessary rights or permission.
+**Download YouTube videos and playlists with the audio tracks and subtitles you choose.**
 
-## Features
+YouTube Smart Downloader is a free, open-source **Windows desktop app** powered by [yt-dlp](https://github.com/yt-dlp/yt-dlp), [FFmpeg](https://ffmpeg.org/) and a graphical interface built with CustomTkinter. Select multiple audio languages, embed subtitles in the same file, choose MP4 or MKV, and process individual videos, playlists or text-file batches.
 
-- Automatically identify a YouTube video or playlist. Links containing both require an explicit choice.
-- Import a UTF-8 TXT file with one video URL per line, preserving the order.
-- Download optional time ranges for individual videos or per TXT entry, using fast cuts.
-- Choose a destination folder and optionally create a subfolder named after the video, playlist or imported TXT file (without its extension).
-- Select and reorder audio languages by name from searchable dropdowns, including regional variants; choose the playback default.
-- Embed selected subtitle languages, preferring published subtitles and optionally allowing automatic captions.
-- Include available languages and report missing ones. If no requested audio exists, skip the video or explicitly allow an unverified fallback.
-- Choose the maximum resolution: best available, 1080p, 720p or 480p.
-- Choose MKV (default) or MP4 with any number of audio and subtitle tracks. Subtitles stay inside the media file.
-- Progress, cancellation, resumable partial files and a per-folder archive.
-- Incremental JSON reports with readable format descriptions and technical IDs.
-- Automatic or forced browser impersonation using the profiles available in yt-dlp.
-- Startup tool checks and optional installation/updates using winget.
+[![Latest release](https://img.shields.io/github/v/release/ipeidro-source/youtube-smart-downloader?label=latest%20release)](https://github.com/ipeidro-source/youtube-smart-downloader/releases/latest)
+[![Windows](https://img.shields.io/badge/platform-Windows-0078D4)](https://github.com/ipeidro-source/youtube-smart-downloader/releases/latest)
+[![CI](https://github.com/ipeidro-source/youtube-smart-downloader/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ipeidro-source/youtube-smart-downloader/actions/workflows/ci.yml)
+[![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-## Windows usage
+**[Download the latest Windows release](https://github.com/ipeidro-source/youtube-smart-downloader/releases/latest)** · [View all releases](https://github.com/ipeidro-source/youtube-smart-downloader/releases) · [Report an issue](https://github.com/ipeidro-source/youtube-smart-downloader/issues)
 
-1. Download the portable ZIP from [Releases](https://github.com/ipeidro-source/youtube-smart-downloader/releases) and extract it to keep the executable and its license/privacy documents together. The standalone `YouTubeSmartDownloader.exe` is also available.
-2. Run the executable. Windows SmartScreen may ask you to verify its origin.
-3. Startup checks yt-dlp, FFmpeg, ffprobe and Deno. If a tool is missing or unusable, install the listed dependencies or exit. FFmpeg includes ffprobe.
-4. Working tools let you continue even when updates are available or update information cannot be obtained. The **Update tools** button appears only for confirmed updates.
-5. Paste a YouTube link or select **Import links...**, choose the destination, audio/subtitle languages, playback default, format and quality, then select **Download**.
-6. Use **About** to view the application version, author, technologies, project/support links and privacy policy. The **Licenses** tab displays the release's bundled license notices locally.
+> **Portable app, not an installer.** Download the Windows x64 ZIP and extract it, or get the standalone `YouTubeSmartDownloader.exe`. No Python installation is needed to run the executable. The external tools yt-dlp, FFmpeg/ffprobe and Deno are **not bundled**; the app checks them at startup and offers installation through winget when available.
 
-Python is not required for the executable. yt-dlp, FFmpeg/ffprobe and Deno are external tools; they are not bundled. Windows with winget and an internet connection is required for automatic installation. Manual installation is also supported. Restart the app after installation or updates if PATH has changed.
+## Highlights
 
-A Windows portable executable is distributed, not a setup wizard or MSI installer. Windows is the supported desktop platform. Linux CI checks shared Python logic; it does not provide a Linux release or GUI support guarantee.
+| What you can do | How it works |
+| --- | --- |
+| **Choose your audio languages** | Select, reorder and embed multiple available audio tracks, including regional variants, and pick the default playback language. |
+| **Embed subtitles** | Select multiple subtitle languages, prioritizing published captions with optional automatic subtitles. Subtitles are inside the output file, not loose sidecar files. |
+| **Use MP4 or MKV** | Keep multiple audio and subtitle tracks in either container; incompatible MP4 codecs are converted as needed. MKV is the default. |
+| **Download a video or playlist** | Automatically detect the input and explicitly resolve links that could mean either a video or a playlist. |
+| **Process a TXT list** | Import ordered video links from a UTF-8 text file, optionally with a start/end range for each entry. |
+| **Download just a segment** | Specify start/end times for individual videos or TXT entries. Fast keyframe-based cuts are approximate. |
+| **Control quality and destination** | Choose best available, 1080p, 720p or 480p and optionally group downloads in named subfolders. |
+| **Keep track of downloads** | See progress, cancel jobs, resume compatible partial downloads, and review JSON reports and archives. |
 
-Author and copyright holder: **ipeidro** ([@ipeidro-source](https://github.com/ipeidro-source)). Support: [GitHub Issues](https://github.com/ipeidro-source/youtube-smart-downloader/issues). See [Privacy](docs/PRIVACY.md) for network activity and local data, and [Uninstallation](docs/UNINSTALL.md) for removing the application and optional external tools.
+**Language availability depends on the source video.** The app reports missing tracks rather than pretending an unavailable language was downloaded. It can skip a video when no requested audio is present, or use an explicitly enabled, unverified fallback. Videos and playlists must be downloaded only when you have the necessary rights or permission.
+
+## Quick start on Windows
+
+1. Open the **[latest Release](https://github.com/ipeidro-source/youtube-smart-downloader/releases/latest)** and download `YouTubeSmartDownloader-<version>-Windows-x64.zip` (recommended), then extract it. A standalone `YouTubeSmartDownloader.exe` is also provided.
+2. Launch `YouTubeSmartDownloader.exe`. Because the executable is currently unsigned, Windows SmartScreen may ask you to check its origin.
+3. Follow the startup checks for **yt-dlp, FFmpeg/ffprobe and Deno**. If necessary, install them manually or via the application's winget-assisted flow. You need Windows, and winget plus an internet connection for automated installation. After changing PATH, restart the application.
+4. Paste a YouTube video or playlist URL, or click **Import links...** for a TXT batch. Select the audio languages, subtitles, preferred audio, quality, output format and destination, then click **Download**.
+
+The app runs locally, but downloading and dependency checks require network access. Read [Privacy](docs/PRIVACY.md), [Known limitations](docs/LIMITATIONS.md), and [Uninstallation](docs/UNINSTALL.md) for details. Linux CI tests shared Python logic; **Windows is the supported desktop platform**.
+
+## For developers and contributors
+
+This project uses Python 3.11+, CustomTkinter, yt-dlp, FFmpeg, automated tests, Ruff, mypy and GitHub Actions. The Windows portable executable is generated and verified in CI, then published in tagged Releases. You can find the commands under [Development](#development) and the release checks under [CI and releases](#ci-and-releases).
+
+Author and copyright holder: **ipeidro** ([@ipeidro-source](https://github.com/ipeidro-source)). Source code: [MIT License](LICENSE). Not affiliated with YouTube or Google. For technical details, see [Audio and subtitle selection](#audio-and-subtitle-selection), [Input files](#input-files), and [Architecture](#architecture).
 
 ## Input files
 
