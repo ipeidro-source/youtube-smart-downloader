@@ -94,6 +94,18 @@ class ToolManager:
         self.runner = ProcessRunner(cancel_event)
         self.cache_path = cache_path or config_file().with_name("tool-updates.json")
 
+    def impersonation_targets(self) -> list[str]:
+        """Only advertise installed browser families; probing never needs the network."""
+        try:
+            output = self.runner.run(
+                ["yt-dlp", "--ignore-config", "--list-impersonate-targets"],
+                capture_all=True,
+                timeout=10,
+            )
+        except (OSError, RuntimeError, ValueError, TimeoutError):
+            return []
+        return parse_impersonation_targets(output)
+
     def probe(self) -> list[ToolStatus]:
         result = []
         for spec in SPECS:
@@ -277,3 +289,14 @@ class ToolManager:
         except OSError as exc:
             log(f"Could not clear the update cache: {exc}")
         log("Maintenance finished. Restart the app if PATH has changed.")
+
+
+def parse_impersonation_targets(output: str) -> list[str]:
+    families = set()
+    for line in output.splitlines():
+        columns = line.split()
+        if len(columns) == 3 and columns[2] == "curl_cffi":
+            client = columns[0].lower().split("-", 1)[0]
+            if re.fullmatch(r"[a-z]+", client):
+                families.add(client)
+    return sorted(families)

@@ -1,6 +1,6 @@
 """YouTube Smart Downloader, a Windows-first GUI for yt-dlp."""
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"
 APP_NAME = "YouTube Smart Downloader"
 AUTHOR = "ipeidro"
 COPYRIGHT = "Copyright (c) 2026 ipeidro"

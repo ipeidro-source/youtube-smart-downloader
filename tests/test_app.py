@@ -7,7 +7,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from youtube_smart_downloader.app import App
+from youtube_smart_downloader.app import App, language_options
 from youtube_smart_downloader.requests import DownloadRequest, TimeRange
 from youtube_smart_downloader.tools import SPECS, ToolStatus
 
@@ -50,8 +50,10 @@ def test_preference_write_error_is_shown_without_aborting_callback(monkeypatch):
             key: Mock()
             for key in (
                 "destination",
-                "mode",
-                "language",
+                "default_audio",
+                "automatic_subtitles",
+                "output_container",
+                "impersonation",
                 "missing",
                 "quality",
                 "subfolder",
@@ -59,6 +61,8 @@ def test_preference_write_error_is_shown_without_aborting_callback(monkeypatch):
             )
         }
     )
+    app.audio_languages = ["es"]
+    app.subtitle_languages = []
     App._save(app)
     warning.assert_called_once()
     app._log.assert_called_once()
@@ -148,7 +152,12 @@ def test_ambiguous_link_requires_scope_choice(monkeypatch, tmp_path, choice, pla
         range_end=value(end),
         url=value("https://www.youtube.com/watch?v=abcdefghijk&list=PL_test"),
         destination=value(str(tmp_path)),
-        language=value("es"),
+        audio_languages=["es"],
+        subtitle_languages=[],
+        default_audio=value("es"),
+        automatic_subtitles=value(False),
+        output_container=value("mp4"),
+        impersonation=value("auto"),
         missing=value("skip"),
         quality=value("best"),
         subfolder=value(True),
@@ -211,7 +220,12 @@ def test_txt_name_is_forwarded_to_the_download_job(monkeypatch, tmp_path):
         imported_links=["https://www.youtube.com/watch?v=abcdefghijk"],
         imported_name="My links",
         destination=value(str(tmp_path)),
-        language=value("es"),
+        audio_languages=["es"],
+        subtitle_languages=[],
+        default_audio=value("es"),
+        automatic_subtitles=value(False),
+        output_container=value("mp4"),
+        impersonation=value("auto"),
         missing=value("skip"),
         quality=value("best"),
         subfolder=value(True),
@@ -296,3 +310,47 @@ def test_txt_import_keeps_ranges_and_disables_manual_fields(monkeypatch, tmp_pat
     assert [request.time_range for request in app.imported_links] == [TimeRange(1, 3), TimeRange(3)]
     app.start_entry.configure.assert_called_with(state="disabled")
     app.end_entry.configure.assert_called_with(state="disabled")
+
+
+def test_track_removal_preserves_an_audio_and_updates_default(monkeypatch):
+    warning = Mock()
+    monkeypatch.setattr("youtube_smart_downloader.app.messagebox.showwarning", warning)
+    default = {"value": "en"}
+    app = SimpleNamespace(
+        audio_languages=["es", "en"],
+        subtitle_languages=["es"],
+        default_audio=SimpleNamespace(
+            get=lambda: default["value"], set=lambda x: default.update(value=x)
+        ),
+        _render_tracks=Mock(),
+    )
+    App._remove_track(app, "en", True)
+    assert app.audio_languages == ["es"] and default["value"] == "es"
+    App._remove_track(app, "es", True)
+    warning.assert_called_once()
+    assert app.audio_languages == ["es"]
+    App._remove_track(app, "es", False)
+    assert not app.subtitle_languages
+
+
+def test_track_order_and_dropdown_language_deduplication():
+    app = SimpleNamespace(
+        audio_languages=["es", "en"],
+        subtitle_languages=[],
+        _render_tracks=Mock(),
+        audio_list=Mock(),
+        subtitle_list=Mock(),
+        language_menu=Mock(),
+        subtitle_menu=Mock(),
+    )
+    App._move_track(app, "en", True, -1)
+    assert app.audio_languages == ["en", "es"]
+    App._add_track(app, True, "Portuguese (Brazil) [pt-BR]")
+    assert app.audio_languages == ["en", "es", "pt-BR"]
+    App._add_track(app, True, "Portuguese (Brazil) [pt-BR]")
+    assert len(app.audio_languages) == 3
+    App._add_track(app, False, "French [fr]")
+    assert app.subtitle_languages == ["fr"]
+    assert "original" in language_options(True).values()
+    assert "original" not in language_options(False).values()
+    assert "auto" not in language_options(False).values()

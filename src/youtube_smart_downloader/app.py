@@ -9,6 +9,7 @@ import os
 import threading
 import tkinter as tk
 from pathlib import Path
+from functools import partial
 from tkinter import filedialog, messagebox
 from typing import Any
 
@@ -17,11 +18,22 @@ import customtkinter as ctk
 from . import APP_NAME, __version__
 from .about import AboutWindow
 from .core import LANGUAGES, Preferences
+from .languages import LANGUAGE_NAMES
+from .language_picker import LanguagePicker
 from .inputs import classify_url, parse_text_links
 from .requests import DownloadRequest, parse_time_range
 from .engine import Cancelled, DownloadEngine
 from .settings import load, save
 from .tools import SPECS, ToolManager, ToolStatus
+
+
+def language_options(audio: bool) -> dict[str, str]:
+    names = dict(LANGUAGE_NAMES)
+    if audio:
+        names.update({"original": LANGUAGES["original"], "auto": LANGUAGES["auto"]})
+    return {
+        f"{name} [{code}]": code for code, name in sorted(names.items(), key=lambda item: item[1])
+    }
 
 
 class App(ctk.CTk):
@@ -41,8 +53,8 @@ class App(ctk.CTk):
         self.iconphoto(True, self._app_icon)
         if os.name == "nt":
             self.iconbitmap(str(icon_directory / "app-icon.ico"))
-        self.geometry("760x820")
-        self.minsize(700, 780)
+        self.geometry("840x700")
+        self.minsize(780, 660)
         ctk.set_appearance_mode("System")
         data = load()
         self.events: queue.Queue[tuple[Any, ...]] = queue.Queue()
@@ -56,7 +68,12 @@ class App(ctk.CTk):
         )
         self.imported_links: list[DownloadRequest] = []
         self.imported_name: str | None = None
-        self.language = tk.StringVar(value=str(data.get("language") or "es"))
+        self.audio_languages = list(data["audio_languages"])
+        self.subtitle_languages = list(data["subtitle_languages"])
+        self.default_audio = tk.StringVar(value=data["default_audio"])
+        self.automatic_subtitles = tk.BooleanVar(value=data["automatic_subtitles"])
+        self.output_container = tk.StringVar(value=data["container"])
+        self.impersonation = tk.StringVar(value=data["impersonation"])
         self.missing = tk.StringVar(value=str(data.get("missing") or "skip"))
         self.quality = tk.StringVar(value=str(data.get("quality") or "best"))
         self.subfolder = tk.BooleanVar(value=bool(data.get("playlist_subfolder", True)))
@@ -69,92 +86,166 @@ class App(ctk.CTk):
             self.after(200, self._begin_tool_check)
 
     def _build(self) -> None:
-        container = ctk.CTkFrame(self, corner_radius=0)
-        container.pack(fill="both", expand=True, padx=14, pady=14)
-        header = ctk.CTkFrame(container, fg_color="transparent")
-        header.pack(fill="x", pady=(0, 4))
-        ctk.CTkLabel(header, text=APP_NAME, font=ctk.CTkFont(size=25, weight="bold")).pack(
+        main = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
+        main.pack(fill="both", expand=True, padx=14, pady=10)
+        header = ctk.CTkFrame(main, fg_color="transparent")
+        header.pack(fill="x", pady=(0, 6))
+        ctk.CTkLabel(header, text=APP_NAME, font=ctk.CTkFont(size=23, weight="bold")).pack(
             side="left"
         )
-        ctk.CTkButton(header, text="About", width=80, command=self._show_about).pack(side="right")
-        ctk.CTkLabel(container, text="YouTube link").pack(anchor="w")
-        source_row = ctk.CTkFrame(container, fg_color="transparent")
-        source_row.pack(fill="x", pady=(5, 4))
+        ctk.CTkButton(header, text="About", width=70, command=self._show_about).pack(side="right")
+        source_row = ctk.CTkFrame(main, fg_color="transparent")
+        source_row.pack(fill="x")
         ctk.CTkEntry(
-            source_row, textvariable=self.url, placeholder_text="https://www.youtube.com/..."
+            source_row, textvariable=self.url, placeholder_text="YouTube video or playlist link"
         ).pack(side="left", fill="x", expand=True, padx=(0, 8))
         self.import_button = ctk.CTkButton(
             source_row, text="Import links...", width=120, command=self._import_links
         )
         self.import_button.pack(side="right")
         self.input_label = ctk.CTkLabel(
-            container, text="Paste a video or playlist link, or import a TXT file."
+            main, text="Paste a video or playlist link, or import a TXT file.", height=22
         )
-        self.input_label.pack(anchor="w", pady=(0, 12))
-        times = ctk.CTkFrame(container, fg_color="transparent")
-        times.pack(fill="x", pady=(0, 8))
-        ctk.CTkLabel(times, text="Start (optional)").pack(side="left")
-        self.start_entry = ctk.CTkEntry(times, textvariable=self.range_start, width=80)
+        self.input_label.pack(anchor="w")
+        times = ctk.CTkFrame(main, fg_color="transparent")
+        times.pack(fill="x", pady=(0, 6))
+        ctk.CTkLabel(times, text="Start").pack(side="left")
+        self.start_entry = ctk.CTkEntry(times, textvariable=self.range_start, width=85)
         self.start_entry.pack(side="left", padx=(6, 12))
-        ctk.CTkLabel(times, text="End (optional)").pack(side="left")
-        self.end_entry = ctk.CTkEntry(times, textvariable=self.range_end, width=80)
+        ctk.CTkLabel(times, text="End").pack(side="left")
+        self.end_entry = ctk.CTkEntry(times, textvariable=self.range_end, width=85)
         self.end_entry.pack(side="left", padx=(6, 12))
-        ctk.CTkLabel(
-            times,
-            text="Formats: SS, MM:SS or HH:MM:SS",
-        ).pack(side="left")
+        ctk.CTkLabel(times, text="Optional: SS / MM:SS / HH:MM:SS").pack(side="left")
         self.start_entry.configure(state="disabled")
         self.end_entry.configure(state="disabled")
-        ctk.CTkLabel(container, text="Destination folder").pack(anchor="w")
-        row = ctk.CTkFrame(container, fg_color="transparent")
-        row.pack(fill="x", pady=(5, 14))
+        row = ctk.CTkFrame(main, fg_color="transparent")
+        row.pack(fill="x")
+        ctk.CTkLabel(row, text="Destination").pack(side="left", padx=(0, 8))
         ctk.CTkEntry(row, textvariable=self.destination).pack(
             side="left", fill="x", expand=True, padx=(0, 8)
         )
-        ctk.CTkButton(row, text="Browse…", width=100, command=self._browse).pack(side="right")
+        ctk.CTkButton(row, text="Browse...", width=85, command=self._browse).pack(side="right")
         ctk.CTkCheckBox(
-            container,
-            text="Create a subfolder named after the video, playlist or TXT file",
-            variable=self.subfolder,
-        ).pack(anchor="w", pady=(0, 14))
-        grid = ctk.CTkFrame(container, fg_color="transparent")
-        grid.pack(fill="x")
-        grid.grid_columnconfigure((0, 1), weight=1)
-        ctk.CTkLabel(grid, text="Audio language").grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(grid, text="Maximum quality").grid(row=0, column=1, sticky="w")
-        languages = list(LANGUAGES.values())
-        initial_language = LANGUAGES.get(self.language.get(), LANGUAGES["es"])
-        self.language_menu = ctk.CTkOptionMenu(
-            grid, values=languages, command=self._language_changed
-        )
-        self.language_menu.grid(row=1, column=0, sticky="ew", padx=(0, 8), pady=(5, 14))
-        self.language_menu.set(initial_language)
+            main, text="Create a subfolder for the source", variable=self.subfolder, height=24
+        ).pack(anchor="w", pady=6)
+        tracks = ctk.CTkFrame(main, fg_color="transparent")
+        tracks.pack(fill="x", pady=(0, 6))
+        tracks.grid_columnconfigure((0, 1), weight=1, uniform="tracks")
+        for audio, column, title in (
+            (True, 0, "Audio languages"),
+            (False, 1, "Subtitle languages"),
+        ):
+            panel = ctk.CTkFrame(tracks)
+            panel.grid(row=0, column=column, sticky="nsew", padx=(0, 5) if audio else (5, 0))
+            ctk.CTkLabel(panel, text=title, font=ctk.CTkFont(weight="bold"), height=24).pack(
+                anchor="w", padx=8
+            )
+            picker = LanguagePicker(
+                panel,
+                options=language_options(audio),
+                command=partial(self._add_track, audio),
+            )
+            picker.pack(fill="x", padx=8, pady=(0, 5))
+            picker.set("Add language...")
+            listing = tk.Listbox(
+                panel,
+                height=4,
+                font=("Segoe UI", 11),
+                exportselection=False,
+                activestyle="none",
+                borderwidth=0,
+                highlightthickness=0,
+                background=self._apply_appearance_mode(
+                    ctk.ThemeManager.theme["CTkFrame"]["fg_color"]
+                ),
+                foreground=self._apply_appearance_mode(
+                    ctk.ThemeManager.theme["CTkLabel"]["text_color"]
+                ),
+                selectbackground="#1f6aa5",
+                selectforeground="white",
+            )
+            listing.pack(fill="x", padx=8)
+            actions = ctk.CTkFrame(panel, fg_color="transparent")
+            actions.pack(fill="x", padx=8, pady=5)
+            for label, callback, width in (
+                ("Up", lambda is_audio=audio: self._move_selected_track(is_audio, -1), 40),
+                ("Down", lambda is_audio=audio: self._move_selected_track(is_audio, 1), 50),
+                ("Remove", lambda is_audio=audio: self._remove_selected_track(is_audio), 65),
+            ):
+                ctk.CTkButton(actions, text=label, command=callback, width=width, height=25).pack(
+                    side="left", padx=(0, 5)
+                )
+            if audio:
+                self.language_menu = picker
+                self.audio_list = listing
+                ctk.CTkButton(
+                    actions,
+                    text="Set default",
+                    width=85,
+                    height=25,
+                    command=self._make_default_audio,
+                ).pack(side="right")
+                ctk.CTkLabel(panel, text="* Playback default", height=24).pack(
+                    anchor="w", padx=8, pady=(0, 2)
+                )
+            else:
+                self.subtitle_menu = picker
+                self.subtitle_list = listing
+                ctk.CTkCheckBox(
+                    panel,
+                    text="Allow automatic subtitles",
+                    variable=self.automatic_subtitles,
+                    height=24,
+                ).pack(anchor="w", padx=8, pady=(0, 2))
+        self._render_tracks()
+        options = ctk.CTkFrame(main, fg_color="transparent")
+        options.pack(fill="x", pady=(0, 8))
+        options.grid_columnconfigure((0, 1, 2, 3), weight=1, uniform="options")
+        for column, title in enumerate(
+            ("Maximum quality", "Format", "If no requested audio", "Impersonation")
+        ):
+            ctk.CTkLabel(options, text=title, height=22, anchor="w").grid(
+                row=0,
+                column=column,
+                sticky="ew",
+                padx=(0, 8) if column < 3 else 0,
+            )
         self.quality_menu = ctk.CTkOptionMenu(
-            grid,
+            options,
             values=["Best available", "1080p", "720p", "480p"],
             command=self._quality_changed,
         )
-        self.quality_menu.grid(row=1, column=1, sticky="ew", pady=(5, 14))
+        self.quality_menu.grid(row=1, column=0, sticky="ew", padx=(0, 8))
         self.quality_menu.set(
-            {"best": "Best available", "1080": "1080p", "720": "720p", "480": "480p"}.get(
-                self.quality.get(), "Best available"
-            )
+            {"best": "Best available", "1080": "1080p", "720": "720p", "480": "480p"}[
+                self.quality.get()
+            ]
         )
-        ctk.CTkLabel(container, text="If this language is unavailable:").pack(anchor="w")
-        ctk.CTkRadioButton(
-            container,
-            text="Skip the video and report it (recommended)",
-            variable=self.missing,
-            value="skip",
-        ).pack(anchor="w", pady=(5, 5))
-        ctk.CTkRadioButton(
-            container,
-            text="Use original/default audio as a fallback",
-            variable=self.missing,
-            value="fallback",
-        ).pack(anchor="w", pady=(0, 15))
-        actions = ctk.CTkFrame(container, fg_color="transparent")
-        actions.pack(fill="x", pady=(0, 15))
+        ctk.CTkOptionMenu(options, values=["mkv", "mp4"], variable=self.output_container).grid(
+            row=1, column=1, sticky="ew", padx=(0, 8)
+        )
+        self.missing_menu = ctk.CTkOptionMenu(
+            options,
+            values=["Skip video", "Use original/default"],
+            command=lambda label: self.missing.set("skip" if label == "Skip video" else "fallback"),
+        )
+        self.missing_menu.grid(row=1, column=2, sticky="ew", padx=(0, 8))
+        self.missing_menu.set(
+            "Skip video" if self.missing.get() == "skip" else "Use original/default"
+        )
+        self.impersonation_menu = ctk.CTkOptionMenu(
+            options,
+            values=["Automatic"],
+            command=lambda label: self.impersonation.set(
+                "auto" if label == "Automatic" else label.lower()
+            ),
+        )
+        self.impersonation_menu.grid(row=1, column=3, sticky="ew")
+        self.impersonation_menu.set(
+            "Automatic" if self.impersonation.get() == "auto" else self.impersonation.get().title()
+        )
+        actions = ctk.CTkFrame(main, fg_color="transparent")
+        actions.pack(fill="x", pady=(0, 8))
         self.start_button = ctk.CTkButton(actions, text="Download", command=self._start)
         self.start_button.pack(side="left", padx=(0, 8))
         self.cancel_button = ctk.CTkButton(
@@ -164,12 +255,14 @@ class App(ctk.CTk):
         self.install_button = ctk.CTkButton(
             actions, text="Update tools", fg_color="#555", command=self._install
         )
-        self.bar = ctk.CTkProgressBar(container)
+        self.bar = ctk.CTkProgressBar(main)
         self.bar.pack(fill="x")
         self.bar.set(0)
-        self.status_label = ctk.CTkLabel(container, text="Ready", wraplength=650, justify="left")
-        self.status_label.pack(anchor="w", pady=(9, 6))
-        self.log = ctk.CTkTextbox(container, height=115)
+        self.status_label = ctk.CTkLabel(
+            main, text="Ready", wraplength=740, justify="left", height=24
+        )
+        self.status_label.pack(anchor="w", pady=(3, 3))
+        self.log = ctk.CTkTextbox(main, height=75)
         self.log.pack(fill="both", expand=True)
         self.log.configure(state="disabled")
 
@@ -197,6 +290,7 @@ class App(ctk.CTk):
                 statuses = manager.probe()
                 self.events.put(("tools_local", statuses))
                 if all(status.usable for status in statuses):
+                    self.events.put(("impersonation_targets", manager.impersonation_targets()))
                     self.events.put(("tools_updates", manager.check_updates(statuses)))
             except Cancelled:
                 pass
@@ -304,8 +398,80 @@ class App(ctk.CTk):
         self.imported_name = Path(filename).stem
         self.input_label.configure(text=f"Imported {len(imported.links)} videos in file order")
 
-    def _language_changed(self, value: str) -> None:
-        self.language.set(next(key for key, label in LANGUAGES.items() if label == value))
+    def _add_track(self, audio: bool, label: str) -> None:
+        language = language_options(audio).get(label)
+        if language is None:
+            return
+        values = self.audio_languages if audio else self.subtitle_languages
+        if language.lower() not in [code.lower() for code in values]:
+            values.append(language)
+        self._render_tracks()
+        listing = self.audio_list if audio else self.subtitle_list
+        index = next(i for i, code in enumerate(values) if code.lower() == language.lower())
+        listing.selection_clear(0, "end")
+        listing.selection_set(index)
+        listing.see(index)
+        (self.language_menu if audio else self.subtitle_menu).set("Add language...")
+
+    def _selected_track(self, audio: bool) -> str | None:
+        listing = self.audio_list if audio else self.subtitle_list
+        selection = listing.curselection()
+        values = self.audio_languages if audio else self.subtitle_languages
+        return values[selection[0]] if selection else None
+
+    def _remove_selected_track(self, audio: bool) -> None:
+        language = self._selected_track(audio)
+        if language is not None:
+            self._remove_track(language, audio)
+
+    def _move_selected_track(self, audio: bool, direction: int) -> None:
+        language = self._selected_track(audio)
+        if language is not None:
+            self._move_track(language, audio, direction)
+            listing = self.audio_list if audio else self.subtitle_list
+            values = self.audio_languages if audio else self.subtitle_languages
+            listing.selection_clear(0, "end")
+            listing.selection_set(values.index(language))
+            listing.see(values.index(language))
+
+    def _make_default_audio(self) -> None:
+        language = self._selected_track(True)
+        if language is not None:
+            self.default_audio.set(language)
+            self._render_tracks()
+
+    def _remove_track(self, language: str, audio: bool) -> None:
+        values = self.audio_languages if audio else self.subtitle_languages
+        if audio and len(values) == 1:
+            messagebox.showwarning("Audio", "At least one audio language is required.")
+            return
+        values.remove(language)
+        if audio and self.default_audio.get() == language:
+            self.default_audio.set(values[0])
+        self._render_tracks()
+
+    def _move_track(self, language: str, audio: bool, direction: int) -> None:
+        values = self.audio_languages if audio else self.subtitle_languages
+        index = values.index(language)
+        target = index + direction
+        if 0 <= target < len(values):
+            values[index], values[target] = values[target], values[index]
+            self._render_tracks()
+
+    def _render_tracks(self) -> None:
+        for audio, listing, values in (
+            (True, self.audio_list, self.audio_languages),
+            (False, self.subtitle_list, self.subtitle_languages),
+        ):
+            selection = listing.curselection()
+            selected_index = selection[0] if selection else 0
+            listing.delete(0, "end")
+            for language in values:
+                label = LANGUAGE_NAMES.get(language, LANGUAGES.get(language, language))
+                prefix = "* " if audio and language == self.default_audio.get() else "  "
+                listing.insert("end", prefix + label)
+            if values:
+                listing.selection_set(min(selected_index, len(values) - 1))
 
     def _quality_changed(self, value: str) -> None:
         self.quality.set(
@@ -328,7 +494,12 @@ class App(ctk.CTk):
             save(
                 {
                     "destination": self.destination.get(),
-                    "language": self.language.get(),
+                    "audio_languages": self.audio_languages,
+                    "subtitle_languages": self.subtitle_languages,
+                    "default_audio": self.default_audio.get(),
+                    "automatic_subtitles": self.automatic_subtitles.get(),
+                    "container": self.output_container.get(),
+                    "impersonation": self.impersonation.get(),
                     "missing": self.missing.get(),
                     "quality": self.quality.get(),
                     "playlist_subfolder": self.subfolder.get(),
@@ -388,7 +559,15 @@ class App(ctk.CTk):
             messagebox.showerror("Folder", "Choose a destination folder.")
             return
         prefs = Preferences(
-            self.language.get(), self.missing.get(), self.quality.get(), self.subfolder.get()
+            missing=self.missing.get(),
+            quality=self.quality.get(),
+            playlist_subfolder=self.subfolder.get(),
+            audio_languages=tuple(self.audio_languages),
+            subtitle_languages=tuple(self.subtitle_languages),
+            default_audio=self.default_audio.get(),
+            automatic_subtitles=self.automatic_subtitles.get(),
+            container=self.output_container.get(),
+            impersonation=self.impersonation.get(),
         )
         try:
             prefs.validate()
@@ -471,6 +650,10 @@ class App(ctk.CTk):
                 if kind == "tools_local":
                     if not self.closing:
                         self._tools_local(event[1])
+                elif kind == "impersonation_targets":
+                    self.impersonation_menu.configure(
+                        values=["Automatic", *[name.title() for name in event[1]]]
+                    )
                 elif kind == "tools_updates":
                     if not self.closing:
                         self._tools_updates(event[1])
